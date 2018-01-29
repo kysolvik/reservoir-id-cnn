@@ -59,7 +59,7 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
                     num_subsets)
 
     # Create and save csv containing grid coordinates for images
-    grid_coords_df = pd.DataFrame({
+    grid_indices_df = pd.DataFrame({
         'name': ['{}{}'.format(outfile_prefix,snum) 
                     for snum in range(0,num_subsets)],
         'source': os.path.basename(source_path),
@@ -68,7 +68,7 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
         'ymin': sub_ymins,
         'ymax': sub_ymins + dim_y
         })
-    grid_coords_df.to_csv('{}/grid_coords.csv'.format(out_dir), index = False)
+    grid_indices_df.to_csv('{}/grid_indices.csv'.format(out_dir), index = False)
 
     # Save sub-arrays
     for snum in range(0, num_subsets):
