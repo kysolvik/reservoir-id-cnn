@@ -6,9 +6,9 @@ This script extracts subset images from a large geoTiff. These images can then
 be annotated to create training/test data for the CNN.
 
 Example:
-    Create  10x10 sub-images of raster 'eg.tif': 
+    Create 5 10x10 sub-images of raster 'eg.tif': 
     $ python3 extract_subarrays.py eg.tif 5 10 10 out/ --out_prefix='eg_sub_'
-        
+
 """
 
 
@@ -21,6 +21,7 @@ from skimage import io
 
 def argparse_init():
     """Prepare ArgumentParser for inputs"""
+
     p = argparse.ArgumentParser(
             description='Extract subest images from larger raster/image.',
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -48,9 +49,10 @@ def argparse_init():
 
 
 def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
-        source_path, outfile_prefix):
+    source_path, outfile_prefix):
     """Create num_subsets arrays of (dim_x, dim_y) size from arr."""
 
+    # Randomly select locations for sub-arrays
     sub_xmins = np.random.random_integers(0, arr.shape[0] - (dim_x + 1),
                     num_subsets)
     sub_ymins = np.random.random_integers(0, arr.shape[1] - (dim_y + 1),
@@ -96,5 +98,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
