@@ -49,7 +49,7 @@ def argparse_init():
 
 
 def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
-    source_path, outfile_prefix):
+    source_path, out_prefix):
     """Create num_subsets arrays of (dim_x, dim_y) size from arr."""
 
     # Randomly select locations for sub-arrays
@@ -60,7 +60,7 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
 
     # Create and save csv containing grid coordinates for images
     grid_indices_df = pd.DataFrame({
-        'name': ['{}{}'.format(outfile_prefix,snum) 
+        'name': ['{}{}'.format(out_prefix,snum) 
                     for snum in range(0,num_subsets)],
         'source': os.path.basename(source_path),
         'xmin': sub_xmins, 
@@ -72,7 +72,7 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
 
     # Save sub-arrays
     for snum in range(0, num_subsets):
-        subset_path = '{}/{}{}.tif'.format(out_dir,outfile_prefix,snum)
+        subset_path = '{}/{}{}.tif'.format(out_dir,out_prefix,snum)
         sub_arr = arr[sub_xmins[snum]:sub_xmins[snum] + dim_x,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y]
         io.imsave(subset_path, sub_arr, plugin = 'tifffile')
@@ -90,10 +90,9 @@ def main():
 
     # Get subsets
     subset_image(base_image, args.num_subsets, args.subset_dim_x,
-        args.subset_dim_y, args.out_dir, args.source_path, args.outfile_prefix)
+        args.subset_dim_y, args.out_dir, args.source_path, args.out_prefix)
 
     return()  
-    
 
 
 if __name__ == '__main__':
