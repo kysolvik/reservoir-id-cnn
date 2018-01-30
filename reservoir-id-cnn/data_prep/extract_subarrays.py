@@ -9,6 +9,8 @@ Example:
     Create 5 10x10 sub-images of raster 'eg.tif': 
     $ python3 extract_subarrays.py eg.tif 5 10 10 out/ --out_prefix='eg_sub_'
 
+Notes:
+    In order to work with Labelbox, the images must be exported as png or jpg.
 """
 
 
@@ -72,10 +74,10 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
 
     # Save sub-arrays
     for snum in range(0, num_subsets):
-        subset_path = '{}/{}{}.tif'.format(out_dir,out_prefix,snum)
+        subset_path = '{}/{}{}.png'.format(out_dir,out_prefix,snum)
         sub_arr = arr[sub_xmins[snum]:sub_xmins[snum] + dim_x,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y]
-        io.imsave(subset_path, sub_arr, plugin = 'tifffile')
+        io.imsave(subset_path, sub_arr)
 
     return()
 
