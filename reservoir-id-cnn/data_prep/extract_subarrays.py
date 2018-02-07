@@ -50,6 +50,17 @@ def argparse_init():
     return(p)
 
 
+def write_append_csv(df,csv_path):
+    """Check if csv already exists. Append if it does, write w/ header if not"""
+
+    if not os.path.isfile('csv_path'):
+        df.to_csv('csv_path', header = True, index=False)
+    else:
+        df.to_csv('csv_path', mode = 'a', header=False, index=False)
+
+    return()
+
+
 def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
     source_path, out_prefix):
     """Create num_subsets arrays of (dim_x, dim_y) size from arr."""
@@ -70,7 +81,7 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
         'ymin': sub_ymins,
         'ymax': sub_ymins + dim_y
         })
-    grid_indices_df.to_csv('{}/grid_indices.csv'.format(out_dir), index = False)
+    write_append_csv(grid_indices_df,'{}/grid_indices.csv'.format(out_dir))
 
     # Save sub-arrays
     for snum in range(0, num_subsets):
