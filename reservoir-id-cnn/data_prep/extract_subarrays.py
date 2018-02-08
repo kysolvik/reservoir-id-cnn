@@ -66,11 +66,17 @@ def scale_image_tobyte(ar):
 
     minVals = np.amin(np.amin(ar,1),0)
     maxVals = np.amax(np.amax(ar,1),0)
-    byte_ar = np.round(255.0 * (ar - minVals) / (maxVals - minVals - 1.0)) \
+    byte_ar = np.round(255.0 * (ar - minVals) / (maxVals - minVals)) \
         .astype(np.uint8)
     byte_ar[ar == 0] = 0
 
     return(byte_ar)
+
+
+def normalized_diff(ar1, ar2):
+    """Returns normalized difference of two arrays"""
+
+    return((ar1 - ar2) / (ar1 + ar2))
 
 
 def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
@@ -104,6 +110,15 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
                       :]
         sub_vis_im_byte = scale_image_tobyte(sub_vis_im)
         io.imsave(subset_vis_path, sub_vis_im_byte)
+
+        # NDWI image, for annotating
+        subset_ndwi_path = '{}/{}{}_ndwi.png'.format(out_dir,out_prefix,snum)
+        sub_ndwi_im = og_im[sub_xmins[snum]:sub_xmins[snum] + dim_x,
+                      sub_ymins[snum]:sub_ymins[snum] + dim_y,
+                      :]
+        sub_ndwi_im = normalized_diff(sub_ndwi_im[:,:,1],sub_ndwi_im[:,:,3])
+        sub_ndwi_im_byte = scale_image_tobyte(sub_ndwi_im)
+        io.imsave(subset_ndwi_path, sub_ndwi_im_byte)
 
         # Original image, for training
         subset_og_path = '{}/{}{}_og.tif'.format(out_dir,out_prefix,snum)
