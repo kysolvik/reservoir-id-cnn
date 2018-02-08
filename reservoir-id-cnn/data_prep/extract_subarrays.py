@@ -53,10 +53,10 @@ def argparse_init():
 def write_append_csv(df,csv_path):
     """Check if csv already exists. Append if it does, write w/ header if not"""
 
-    if not os.path.isfile('csv_path'):
-        df.to_csv('csv_path', header = True, index=False)
+    if not os.path.isfile(csv_path):
+        df.to_csv(csv_path, header = True, index=False)
     else:
-        df.to_csv('csv_path', mode = 'a', header=False, index=False)
+        df.to_csv(csv_path, mode = 'a', header=False, index=False)
 
     return()
 
@@ -87,7 +87,8 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
     for snum in range(0, num_subsets):
         subset_path = '{}/{}{}.png'.format(out_dir,out_prefix,snum)
         sub_arr = arr[sub_xmins[snum]:sub_xmins[snum] + dim_x,
-                      sub_ymins[snum]:sub_ymins[snum] + dim_y]
+                      sub_ymins[snum]:sub_ymins[snum] + dim_y,
+                      :]
         io.imsave(subset_path, sub_arr)
 
     return()
@@ -99,10 +100,13 @@ def main():
     args = parser.parse_args()
 
     # Read image
-    base_image = io.imread(args.source_path, plugin = 'tifffile') 
+    base_image = io.imread(args.source_path) 
+    print(base_image.shape)
+    base_image_bandselect = base_image[:,:,[2,1,0]]
+    print(base_image_bandselect.shape)
 
     # Get subsets
-    subset_image(base_image, args.num_subsets, args.subset_dim_x,
+    subset_image(base_image_bandselect, args.num_subsets, args.subset_dim_x,
         args.subset_dim_y, args.out_dir, args.source_path, args.out_prefix)
 
     return()  
