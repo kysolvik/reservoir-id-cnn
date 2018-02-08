@@ -61,6 +61,17 @@ def write_append_csv(df,csv_path):
     return()
 
 
+def scale_image_tobyte(ar):
+    """Scale larger data type array to byte"""
+
+    minVals = np.amin(np.amin(ar,1),0)
+    maxVals = np.amax(np.amax(ar,1),0)
+    byte_ar = np.round(255.0 * (ar - minVals) / (maxVals - minVals - 1.0)).astype(np.uint8)
+    byte_ar[ar == 0] = 0
+
+    return(byte_ar)
+
+
 def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
     source_path, out_prefix):
     """Create num_subsets arrays of (dim_x, dim_y) size from arr."""
@@ -89,7 +100,8 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
         sub_arr = arr[sub_xmins[snum]:sub_xmins[snum] + dim_x,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y,
                       :]
-        io.imsave(subset_path, sub_arr)
+        sub_arr_byte = scale_image_tobyte(sub_arr)
+        io.imsave(subset_path, sub_arr_byte)
 
     return()
 
@@ -103,14 +115,8 @@ def main():
     base_image = io.imread(args.source_path) 
     base_image_bandselect = base_image[:,:,[2,1,0]]
 
-    # Convert to uint8
-    minVals = np.amin(np.amin(base_image_bandselect,1),0)
-    maxVals = np.amax(np.amax(base_image_bandselect,1),0)
-    byte_array = np.round(255.0 * (base_image_bandselect - minVals) / (maxVals - minVals - 1.0)).astype(np.uint8)
-    byte_array[base_image_bandselect == 0] = 0
-
     # Get subsets
-    subset_image(byte_array, args.num_subsets, args.subset_dim_x,
+    subset_image(base_image_bandselect, args.num_subsets, args.subset_dim_x,
         args.subset_dim_y, args.out_dir, args.source_path, args.out_prefix)
 
     return()  
