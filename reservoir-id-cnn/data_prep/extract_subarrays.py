@@ -98,7 +98,7 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
     # Save sub-arrays
     for snum in range(0, num_subsets):
         # Vis image, for annotating
-        subset_vis_path = '{}/{}{}_vis.jpg'.format(out_dir,out_prefix,snum)
+        subset_vis_path = '{}/{}{}_vis.png'.format(out_dir,out_prefix,snum)
         sub_vis_im = vis_im[sub_xmins[snum]:sub_xmins[snum] + dim_x,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y,
                       :]
