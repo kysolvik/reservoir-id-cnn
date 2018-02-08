@@ -73,19 +73,19 @@ def scale_image_tobyte(ar):
     return(byte_ar)
 
 
-def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
+def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
     source_path, out_prefix):
-    """Create num_subsets arrays of (dim_x, dim_y) size from arr."""
+    """Create num_subsets images of (dim_x, dim_y) size from vis_im."""
 
     # Randomly select locations for sub-arrays
-    sub_xmins = np.random.random_integers(0, arr.shape[0] - (dim_x + 1),
+    sub_xmins = np.random.random_integers(0, vis_im.shape[0] - (dim_x + 1),
                     num_subsets)
-    sub_ymins = np.random.random_integers(0, arr.shape[1] - (dim_y + 1),
+    sub_ymins = np.random.random_integers(0, vis_im.shape[1] - (dim_y + 1),
                     num_subsets)
 
     # Create and save csv containing grid coordinates for images
     grid_indices_df = pd.DataFrame({
-        'name': ['{}{}'.format(out_prefix,snum) 
+        'name': ['{}{}_vis'.format(out_prefix,snum) 
                     for snum in range(0,num_subsets)],
         'source': os.path.basename(source_path),
         'xmin': sub_xmins, 
@@ -97,12 +97,20 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
 
     # Save sub-arrays
     for snum in range(0, num_subsets):
-        subset_path = '{}/{}{}.jpg'.format(out_dir,out_prefix,snum)
-        sub_arr = arr[sub_xmins[snum]:sub_xmins[snum] + dim_x,
+        # Vis image, for annotating
+        subset_vis_path = '{}/{}{}_vis.jpg'.format(out_dir,out_prefix,snum)
+        sub_vis_im = vis_im[sub_xmins[snum]:sub_xmins[snum] + dim_x,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y,
                       :]
-        sub_arr_byte = scale_image_tobyte(sub_arr)
-        io.imsave(subset_path, sub_arr_byte)
+        sub_vis_im_byte = scale_image_tobyte(sub_vis_im)
+        io.imsave(subset_vis_path, sub_vis_im_byte)
+
+        # Original image, for training
+        subset_og_path = '{}/{}{}_og.tif'.format(out_dir,out_prefix,snum)
+        sub_og_im = og_im[sub_xmins[snum]:sub_xmins[snum] + dim_x,
+                      sub_ymins[snum]:sub_ymins[snum] + dim_y,
+                      :]
+        io.imsave(subset_og_path, sub_og_im)
 
     return()
 
@@ -117,8 +125,9 @@ def main():
     base_image_bandselect = base_image[:,:,[2,1,0]]
 
     # Get subsets
-    subset_image(base_image_bandselect, args.num_subsets, args.subset_dim_x,
-        args.subset_dim_y, args.out_dir, args.source_path, args.out_prefix)
+    subset_image(base_image_bandselect, base_image, args.num_subsets,
+        args.subset_dim_x,args.subset_dim_y, 
+        args.out_dir, args.source_path, args.out_prefix)
 
     return()  
 
