@@ -10,11 +10,11 @@
 # Set google cloud storage path
 gs_dir=$1
 
-# # Copy files to gs
-# gsutil -m cp ./*.png $gs_dir
-# 
-# # Set permissions
-# gsutil iam ch -r allUsers:legacyObjectReader $gs_dir
+# Copy files to gs
+gsutil -m cp ./*.png $gs_dir
+
+# Set permissions
+gsutil iam ch -r allUsers:legacyObjectReader $gs_dir
 
 # Create csv
 echo 'Image URL' > ./labelbox_urls.csv
