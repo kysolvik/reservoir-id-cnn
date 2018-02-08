@@ -6,14 +6,18 @@
 # Will need more attention later.
 ###
 
-# Copy files to gs
-gsutil -m cp ./*.png gs://res-id/cnn/training/raw_subsets
 
-# Set permissions
-gsutil iam ch allUsers:legacyObjectReader gs://res-id/cnn/training/raw_subsets/*
+# Set google cloud storage path
+gs_dir=$1
+
+# # Copy files to gs
+# gsutil -m cp ./*.png $gs_dir
+# 
+# # Set permissions
+# gsutil iam ch -r allUsers:legacyObjectReader $gs_dir
 
 # Create csv
 echo 'Image URL' > ./labelbox_urls.csv
-gsutil ls gs://res-id/cnn/training/raw_subsets/ >> ./labelbox_urls.csv
-sed -i 's-gs://-https://storage.googleapis.com/-g' ./labelbox_urls.csv
+gsutil ls $gs_dir >> ./labelbox_urls.csv
+sed -i -e "s@${gs_dir}@https://storage.googleapis.com/@g" ./labelbox_urls.csv
 
