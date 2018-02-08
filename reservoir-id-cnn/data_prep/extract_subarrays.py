@@ -85,7 +85,7 @@ def subset_image(arr, num_subsets, dim_x, dim_y, out_dir,
 
     # Save sub-arrays
     for snum in range(0, num_subsets):
-        subset_path = '{}/{}{}.png'.format(out_dir,out_prefix,snum)
+        subset_path = '{}/{}{}.jpg'.format(out_dir,out_prefix,snum)
         sub_arr = arr[sub_xmins[snum]:sub_xmins[snum] + dim_x,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y,
                       :]
@@ -101,12 +101,16 @@ def main():
 
     # Read image
     base_image = io.imread(args.source_path) 
-    print(base_image.shape)
     base_image_bandselect = base_image[:,:,[2,1,0]]
-    print(base_image_bandselect.shape)
+
+    # Convert to uint8
+    minVals = np.amin(np.amin(base_image_bandselect,1),0)
+    maxVals = np.amax(np.amax(base_image_bandselect,1),0)
+    byte_array = np.round(255.0 * (base_image_bandselect - minVals) / (maxVals - minVals - 1.0)).astype(np.uint8)
+    byte_array[base_image_bandselect == 0] = 0
 
     # Get subsets
-    subset_image(base_image_bandselect, args.num_subsets, args.subset_dim_x,
+    subset_image(byte_array, args.num_subsets, args.subset_dim_x,
         args.subset_dim_y, args.out_dir, args.source_path, args.out_prefix)
 
     return()  
