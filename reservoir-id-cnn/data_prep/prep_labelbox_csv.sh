@@ -9,9 +9,11 @@
 
 # Set google cloud storage path
 gs_dir=$1
+# Set image suffix, either _ndwi.png or _vis.png
+image_suffix=$2  
 
 # Copy files to gs
-gsutil -m cp ./*.png $gs_dir
+gsutil -m cp "./*${image_suffix}" $gs_dir
 
 # Set permissions
 gsutil iam ch -r allUsers:legacyObjectReader $gs_dir
