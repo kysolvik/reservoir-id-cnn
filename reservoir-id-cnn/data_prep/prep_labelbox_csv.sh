@@ -21,5 +21,5 @@ gsutil iam ch -r allUsers:legacyObjectReader $gs_dir
 # Create csv
 echo 'Image URL' > ./labelbox_urls.csv
 gsutil ls $gs_dir >> ./labelbox_urls.csv
-sed -i -e "s@${gs_dir}@https://storage.googleapis.com/@g" ./labelbox_urls.csv
+sed -i -e "s@gs://@https://storage.googleapis.com/@g" ./labelbox_urls.csv
 
