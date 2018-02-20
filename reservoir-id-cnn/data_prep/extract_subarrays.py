@@ -66,7 +66,7 @@ def scale_image_tobyte(ar):
 
     minVals = np.amin(np.amin(ar,1),0)
     maxVals = np.amax(np.amax(ar,1),0)
-    byte_ar = np.round(255.0 * (ar - minVals) / (maxVals - minVals - 1.0)) \
+    byte_ar = np.round(255.0 * (ar - minVals) / (maxVals - minVals)) \
         .astype(np.uint8)
     byte_ar[ar == 0] = 0
 
@@ -75,6 +75,10 @@ def scale_image_tobyte(ar):
 
 def normalized_diff(ar1, ar2):
     """Returns normalized difference of two arrays"""
+     
+    # Convert arrays to float32
+    ar1 = ar1.astype('float32')
+    ar2 = ar2.astype('float32')
 
     return((ar1 - ar2) / (ar1 + ar2))
 
