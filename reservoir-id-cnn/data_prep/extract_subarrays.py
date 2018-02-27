@@ -19,6 +19,7 @@ import argparse
 import numpy as np
 import pandas as pd
 from skimage import io
+import gdal
 
 
 def argparse_init():
@@ -83,20 +84,27 @@ def normalized_diff(ar1, ar2):
     return((ar1 - ar2) / (ar1 + ar2))
 
 
-def create_gmaps_link(xmin, ymin, xmax, ymax, source_path):
+def create_gmaps_link(xmin_pix, ymin_pix, xmax_pix, ymax_pix, gt):
     """Create a Google Maps link to include in csv to help with annotation
     Link will zoom to center of subset image in Google Maps"""
 
-    lat_center = 
-    lon_center = 
+    xmean_pix = (xmin_pix + xmax_pix)/2
+    ymean_pix = (ymin_pix + ymax_pix)/2
 
-    gmaps_link = "https://www.google.com/maps/@{},{},2783m/data=!3m1!1e3"\
-                    .format(lat_center, lon_center)
+    # Longitude, latitude of center
+    center_coords = np.stack((gt[0] + xmean_pix*gt[2]+(ymean_pix*gt[1]),
+                             gt[3] + xmean_pix*gt[5]+(ymean_pix*gt[4])),
+                             axis = 1)
 
-    return(gmaps_link)
+
+    gmaps_links = ["https://www.google.com/maps/@{},{},5000m/data=!3m1!1e3"\
+                    .format(coord[1], coord[0]) for coord in center_coords]
+
+    return(gmaps_links)
+
 
 def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
-    source_path, out_prefix):
+        source_path, out_prefix):
     """Create num_subsets images of (dim_x, dim_y) size from vis_im."""
 
     # Randomly select locations for sub-arrays
@@ -104,6 +112,18 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
                     num_subsets)
     sub_ymins = np.random.random_integers(0, vis_im.shape[1] - (dim_y + 1),
                     num_subsets)
+    
+    # Get xmaxs and ymaxs
+    sub_xmaxs = sub_xmins + dim_x
+    sub_ymaxs = sub_ymins + dim_y
+
+    # Geotransformation
+    source_geotrans = gdal.Open(source_path).GetGeoTransform()
+
+    # Get Google maps link
+    sub_gmaps_links = create_gmaps_link(sub_xmins, sub_ymins, sub_xmaxs, 
+                                        sub_ymaxs, source_geotrans)
+
 
     # Create and save csv containing grid coordinates for images
     grid_indices_df = pd.DataFrame({
@@ -111,9 +131,10 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
                     for snum in range(0,num_subsets)],
         'source': os.path.basename(source_path),
         'xmin': sub_xmins, 
-        'xmax': sub_xmins + dim_x,
+        'xmax': sub_xmaxs,
         'ymin': sub_ymins,
-        'ymax': sub_ymins + dim_y
+        'ymax': sub_ymaxs,
+        'gmaps_link': sub_gmaps_links
         })
     write_append_csv(grid_indices_df,'{}/grid_indices.csv'.format(out_dir))
 
