@@ -83,6 +83,18 @@ def normalized_diff(ar1, ar2):
     return((ar1 - ar2) / (ar1 + ar2))
 
 
+def create_gmaps_link(xmin, ymin, xmax, ymax, source_path):
+    """Create a Google Maps link to include in csv to help with annotation
+    Link will zoom to center of subset image in Google Maps"""
+
+    lat_center = 
+    lon_center = 
+
+    gmaps_link = "https://www.google.com/maps/@{},{},2783m/data=!3m1!1e3"\
+                    .format(lat_center, lon_center)
+
+    return(gmaps_link)
+
 def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
     source_path, out_prefix):
     """Create num_subsets images of (dim_x, dim_y) size from vis_im."""
