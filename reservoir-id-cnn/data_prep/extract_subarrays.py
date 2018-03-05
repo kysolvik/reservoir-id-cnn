@@ -124,7 +124,6 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
     sub_gmaps_links = create_gmaps_link(sub_xmins, sub_ymins, sub_xmaxs, 
                                         sub_ymaxs, source_geotrans)
 
-
     # Create and save csv containing grid coordinates for images
     grid_indices_df = pd.DataFrame({
         'name': ['{}{}_ndwi'.format(out_prefix,snum) 
@@ -150,14 +149,14 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
             continue
         sub_ndwi_im = normalized_diff(sub_ndwi_im[:,:,1],sub_ndwi_im[:,:,3])
         sub_ndwi_im_byte = scale_image_tobyte(sub_ndwi_im)
-        io.imsave(subset_ndwi_path, sub_ndwi_im_byte)
+        io.imsave(subset_ndwi_path, sub_ndwi_im_byte, plugin = 'pil')
 
         # Original image, for training
         subset_og_path = '{}/{}{}_og.tif'.format(out_dir,out_prefix,snum)
         sub_og_im = og_im[sub_xmins[snum]:sub_xmins[snum] + dim_x,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y,
                       :]
-        io.imsave(subset_og_path, sub_og_im)
+        io.imsave(subset_og_path, sub_og_im, plugin = 'pil')
 
     return()
 
@@ -168,7 +167,7 @@ def main():
     args = parser.parse_args()
 
     # Read image
-    base_image = io.imread(args.source_path) 
+    base_image = io.imread(args.source_path, plugin = 'pil')
     base_image_bandselect = base_image[:,:,[2,1,0]]
 
     # Get subsets
