@@ -145,7 +145,7 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y,
                       :]
         # Check image for no data
-        if not np.all(sub_ndwi_im == nodata):
+        if np.any(sub_ndwi_im == nodata):
             continue
         sub_ndwi_im = normalized_diff(sub_ndwi_im[:,:,1],sub_ndwi_im[:,:,3])
         sub_ndwi_im_byte = scale_image_tobyte(sub_ndwi_im)
@@ -156,7 +156,7 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
         sub_og_im = og_im[sub_xmins[snum]:sub_xmins[snum] + dim_x,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y,
                       :]
-        io.imsave(subset_og_path, sub_og_im, plugin = 'pil')
+        io.imsave(subset_og_path, sub_og_im, plugin = 'tifffile', compress = 6)
 
     return()
 
@@ -167,7 +167,7 @@ def main():
     args = parser.parse_args()
 
     # Read image
-    base_image = io.imread(args.source_path, plugin = 'pil')
+    base_image = io.imread(args.source_path)
     base_image_bandselect = base_image[:,:,[2,1,0]]
 
     # Get subsets
