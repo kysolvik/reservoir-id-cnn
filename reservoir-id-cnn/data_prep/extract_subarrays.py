@@ -135,9 +135,9 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
         'ymax': sub_ymaxs,
         'gmaps_link': sub_gmaps_links
         })
-    write_append_csv(grid_indices_df,'{}/grid_indices.csv'.format(out_dir))
 
     # Save sub-arrays
+    null_im_mask = np.ones(num_subsets, dtype = bool)
     for snum in range(0, num_subsets):
         # NDWI image, for annotating
         subset_ndwi_path = '{}/{}{}_ndwi.png'.format(out_dir,out_prefix,snum)
@@ -146,6 +146,7 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
                       :]
         # Check image for no data
         if np.any(sub_ndwi_im == nodata):
+            null_im_mask[snum] = False
             continue
         sub_ndwi_im = normalized_diff(sub_ndwi_im[:,:,1],sub_ndwi_im[:,:,3])
         sub_ndwi_im_byte = scale_image_tobyte(sub_ndwi_im)
@@ -157,6 +158,10 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y,
                       :]
         io.imsave(subset_og_path, sub_og_im, plugin = 'tifffile', compress = 6)
+
+    # Write grid indices to csv
+    grid_indices_df = grid_indices_df.iloc[null_im_mask]
+    write_append_csv(grid_indices_df,'{}/grid_indices.csv'.format(out_dir))
 
     return()
 
