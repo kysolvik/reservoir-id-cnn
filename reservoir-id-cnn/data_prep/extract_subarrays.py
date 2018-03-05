@@ -75,8 +75,8 @@ def scale_image_tobyte(ar):
 
 
 def normalized_diff(ar1, ar2):
-    """Returns normalized difference of two arrays"""
-     
+    """Returns normalized difference of two arrays."""
+
     # Convert arrays to float32
     ar1 = ar1.astype('float32')
     ar2 = ar2.astype('float32')
@@ -104,7 +104,7 @@ def create_gmaps_link(xmin_pix, ymin_pix, xmax_pix, ymax_pix, gt):
 
 
 def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
-        source_path, out_prefix):
+        source_path, out_prefix, nodata = 0):
     """Create num_subsets images of (dim_x, dim_y) size from vis_im."""
 
     # Randomly select locations for sub-arrays
@@ -127,7 +127,7 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
 
     # Create and save csv containing grid coordinates for images
     grid_indices_df = pd.DataFrame({
-        'name': ['{}{}_vis'.format(out_prefix,snum) 
+        'name': ['{}{}_ndwi'.format(out_prefix,snum) 
                     for snum in range(0,num_subsets)],
         'source': os.path.basename(source_path),
         'xmin': sub_xmins, 
@@ -140,19 +140,14 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
 
     # Save sub-arrays
     for snum in range(0, num_subsets):
-        # Vis image, for annotating
-        subset_vis_path = '{}/{}{}_vis.png'.format(out_dir,out_prefix,snum)
-        sub_vis_im = vis_im[sub_xmins[snum]:sub_xmins[snum] + dim_x,
-                      sub_ymins[snum]:sub_ymins[snum] + dim_y,
-                      :]
-        sub_vis_im_byte = scale_image_tobyte(sub_vis_im)
-        io.imsave(subset_vis_path, sub_vis_im_byte)
-
         # NDWI image, for annotating
         subset_ndwi_path = '{}/{}{}_ndwi.png'.format(out_dir,out_prefix,snum)
         sub_ndwi_im = og_im[sub_xmins[snum]:sub_xmins[snum] + dim_x,
                       sub_ymins[snum]:sub_ymins[snum] + dim_y,
                       :]
+        # Check image for no data
+        if not np.all(sub_ndwi_im == nodata):
+            continue
         sub_ndwi_im = normalized_diff(sub_ndwi_im[:,:,1],sub_ndwi_im[:,:,3])
         sub_ndwi_im_byte = scale_image_tobyte(sub_ndwi_im)
         io.imsave(subset_ndwi_path, sub_ndwi_im_byte)
