@@ -37,7 +37,7 @@ def find_ims_masks(labelbox_json):
 def download_im_mask_pair(og_url, mask_url, destination_dir):
     """Downloads original image and mask, renaming mask to match image."""
 
-    og_dest_file = '{}/{}'.format(destination_dir, os.path.basename(og_url)
+    og_dest_file = '{}/{}'.format(destination_dir, os.path.basename(og_url))
     urllib.request.urlretrieve(og_url, filename=og_dest_file)  
     
     if mask_url is not None:
