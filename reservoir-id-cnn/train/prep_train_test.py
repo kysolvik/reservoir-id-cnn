@@ -36,6 +36,16 @@ def find_ims_masks(labelbox_json):
     return og_mask_tuples
 
 
+def save_empty_mask(mask_path, dim_x, dim_y):
+    """Writes an all-zeros mask file (png) given dim_x and dim_y"""
+
+    mask_array = np.zeros([dim_x,dim_y], dtype='byte')
+    im = Image.fromarray(mask_array)
+    im.save(mask_path)
+
+    return None
+
+
 def download_im_mask_pair(og_url, mask_url, destination_dir,
                           dim_x=500, dim_y=500):
     """Downloads original image and mask, renaming mask to match image."""
@@ -49,15 +59,5 @@ def download_im_mask_pair(og_url, mask_url, destination_dir,
         save_empty_mask(mask_dest_file, dim_x, dim_y)
     else:
         urllib.request.urlretrieve(mask_url, filename=mask_dest_file)
-
-    return None
-
-
-def save_empty_mask(mask_path, dim_x, dim_y):
-    """Writes an all-zeros mask file (png) given dim_x and dim_y"""
-
-    mask_array = np.zeros([dim_x,dim_y], dtype='byte')
-    im = Image.fromarray(mask_array)
-    im.save(mask_path)
 
     return None
