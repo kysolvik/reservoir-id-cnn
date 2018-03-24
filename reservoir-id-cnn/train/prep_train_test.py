@@ -41,7 +41,7 @@ def download_im_mask_pair(og_url, mask_url, destination_dir):
     urllib.request.urlretrieve(og_url, filename=og_dest_file)  
     
     if mask_url is not None:
-        mask_dest_file = og_dest_file.replace('og.tif', 'mask.png', regex=True)
+        mask_dest_file = og_dest_file.replace('og.tif', 'mask.png')
         urllib.request.urlretrieve(mask_url, filename=mask_dest_file)
 
     return None
