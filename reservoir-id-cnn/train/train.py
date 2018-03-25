@@ -1,3 +1,5 @@
+# From https://github.com/jocicmarko/ultrasound-nerve-segmentation
+
 def get_unet(img_rows, img_cols, img_bands):
     inputs = Input((img_rows, img_cols, img_bands))
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
