@@ -1,7 +1,17 @@
+#!/usr/bin/env python3
+"""
+
+"""
+
+import keras
 # From https://github.com/jocicmarko/ultrasound-nerve-segmentation
 
-def get_unet(img_rows, img_cols, img_bands):
-    inputs = Input((img_rows, img_cols, img_bands))
+RESIZE_ROWS = 96
+RESIZE_COLS = 96
+# Resized dimensions for training/testing.
+
+def get_unet(RESIZE_ROWS, RESIZE_COLS, img_bands):
+    inputs = Input((RESIZE_ROWS, RESIZE_COLS, img_bands))
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
     pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
@@ -45,10 +55,12 @@ def get_unet(img_rows, img_cols, img_bands):
 
     return model
 
+
 def preprocess(imgs):
-    imgs_p = np.ndarray((imgs.shape[0], img_rows, img_cols), dtype=np.uint8)
+    imgs_p = np.ndarray((imgs.shape[0], RESIZE_ROWS, RESIZE_COLS), dtype=np.uint8)
+
     for i in range(imgs.shape[0]):
-        imgs_p[i] = resize(imgs[i], (img_cols, img_rows), preserve_range=True)
+        imgs_p[i] = resize(imgs[i], (RESIZE_ROWS, RESIZE_COLS), preserve_range=True)
 
     imgs_p = imgs_p[..., np.newaxis]
     return imgs_p
@@ -58,7 +70,8 @@ def train_and_predict():
     print('-'*30)
     print('Loading and preprocessing train data...')
     print('-'*30)
-    imgs_train, imgs_mask_train = load_train_data()
+    imgs_train = np.load('./imgs_train.npy')
+    imgs_mask_train = np.load('./imgs_mask_train.npy')
 
     imgs_train = preprocess(imgs_train)
     imgs_mask_train = preprocess(imgs_mask_train)
@@ -89,7 +102,7 @@ def train_and_predict():
     print('-'*30)
     print('Loading and preprocessing test data...')
     print('-'*30)
-    imgs_test, imgs_id_test = load_test_data()
+    imgs_test = np.load('./imgs_test.npy')
     imgs_test = preprocess(imgs_test)
 
     imgs_test = imgs_test.astype('float32')
@@ -107,14 +120,4 @@ def train_and_predict():
     imgs_mask_test = model.predict(imgs_test, verbose=1)
     np.save('imgs_mask_test.npy', imgs_mask_test)
 
-    print('-' * 30)
-    print('Saving predicted masks to files...')
-    print('-' * 30)
-    pred_dir = 'preds'
-    if not os.path.exists(pred_dir):
-        os.mkdir(pred_dir)
-    for image, image_id in zip(imgs_mask_test, imgs_id_test):
-        image = (image[:, :, 0] * 255.).astype(np.uint8)
-        imsave(os.path.join(pred_dir, str(image_id) + '_pred.png'), image)
-        
-    return None
+    return
