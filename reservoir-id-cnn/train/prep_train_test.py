@@ -41,7 +41,7 @@ def find_ims_masks(labelbox_json):
 def save_empty_mask(mask_path, dim_x, dim_y):
     """Writes an all-zeros mask file (png) given dim_x and dim_y"""
 
-    mask_array = np.zeros([dim_x,dim_y], dtype='byte')
+    mask_array = np.zeros([dim_x,dim_y], dtype=np.uint8)
     im = Image.fromarray(mask_array)
     im.save(mask_path)
 
@@ -65,24 +65,28 @@ def download_im_mask_pair(og_url, mask_url, destination_dir,
     return None
 
 
-def create_train_test_data(dim_x, dim_y, data_path='./data/', test_frac=0.2):
+def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
+                           test_frac=0.2):
     """Save training and test data into easy .npy file"""
     images = os.listdir(data_path)
     total = int(len(images) / 2) # ksolvik: Needed to convert to int
 
-    imgs = np.ndarray((total, dim_x, dim_y), dtype=np.uint16)
+    imgs = np.ndarray((total, dim_x, dim_y, nbands), dtype=np.uint16)
     imgs_mask = np.ndarray((total, dim_x, dim_y), dtype=np.uint8)
 
     i = 0
     print('-'*30)
     print('Loading images')
     print('-'*30)
+    og_img_names = []
     for image_name in images:
         if 'mask' in image_name:
             continue
-        image_mask_name = image_name.split('.')[0] + '_mask.png'
-        img = imread(os.path.join(data_path, image_name), as_grey=True)
-        img_mask = imread(os.path.join(data_path, image_mask_name), as_grey=True)
+        print(image_name)
+        image_mask_name = image_name.replace('og.tif', 'mask.png')
+        img = io.imread(os.path.join(data_path, image_name), as_grey=False)
+        img_mask = io.imread(os.path.join(data_path, image_mask_name),
+                             as_grey=True)
 
         img = np.array([img])
         img_mask = np.array([img_mask])
@@ -93,22 +97,36 @@ def create_train_test_data(dim_x, dim_y, data_path='./data/', test_frac=0.2):
         if i % 100 == 0:
             print('Done: {}/{} images'.format(i, total))
         i += 1
+
+        og_img_names += [image_name]
+
     print('Loading done.')
 
     # Split into training, test.
     total_ims = imgs.shape[0]
     train_count = round(total_ims * (1 - test_frac))
     train_indices = random.sample(range(total_ims), train_count)
+    test_indices = np.delete(np.array(range(total_ims)), train_indices)
 
     imgs_train = imgs[train_indices]
     imgs_train_mask = imgs_mask[train_indices]
-    imgs_test = np.delete(imgs, train_indices)
-    imgs_test_mask = np.delete(imgs_mask, train_indices)
+    train_img_names = [og_img_names[i] for i in train_indices]
+    imgs_test = imgs[test_indices]
+    imgs_test_mask = imgs_mask[test_indices]
+    test_img_names = [og_img_names[i] for i in test_indices]
 
     np.save('imgs_train.npy', imgs_train)
     np.save('imgs_train_mask.npy', imgs_train_mask)
     np.save('imgs_test.npy', imgs_test)
     np.save('imgs_test_mask.npy', imgs_test_mask)
+
+    # Write image names
+    with open('./train_names.csv', 'w') as wf:
+        for img_name in train_img_names:
+            wf.write('{}\n'.format(img_name))
+    with open('./test_names.csv', 'w') as wf:
+        for img_name in test_img_names:
+            wf.write('{}\n'.format(img_name))
 
     print('Saving to .npy files done.')
 
