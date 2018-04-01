@@ -3,15 +3,24 @@
 
 """
 
-import keras
-# From https://github.com/jocicmarko/ultrasound-nerve-segmentation
+import os
+from skimage.transform import resize
+import numpy as np
+from keras.models import Model
+from keras.layers import Input, concatenate, Conv2D, MaxPoo
+from keras.optimizers import Adam
+from keras.callbacks import ModelCheckpoint
+from keras import backend as K
+
 
 RESIZE_ROWS = 96
 RESIZE_COLS = 96
 # Resized dimensions for training/testing.
+NUM_BANDS = 4
+# Number of bands in image.
 
-def get_unet(RESIZE_ROWS, RESIZE_COLS, img_bands):
-    inputs = Input((RESIZE_ROWS, RESIZE_COLS, img_bands))
+def get_unet(RESIZE_ROWS, RESIZE_COLS, NUM_BANDS):
+    inputs = Input((RESIZE_ROWS, RESIZE_COLS, NUM_BANDS))
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
     pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
@@ -56,8 +65,8 @@ def get_unet(RESIZE_ROWS, RESIZE_COLS, img_bands):
     return model
 
 
-def preprocess(imgs):
-    imgs_p = np.ndarray((imgs.shape[0], RESIZE_ROWS, RESIZE_COLS), dtype=np.uint8)
+def resize(imgs):
+    imgs_p = np.ndarray((imgs.shape[0], RESIZE_ROWS, RESIZE_COLS))
 
     for i in range(imgs.shape[0]):
         imgs_p[i] = resize(imgs[i], (RESIZE_ROWS, RESIZE_COLS), preserve_range=True)
@@ -73,8 +82,8 @@ def train_and_predict():
     imgs_train = np.load('./imgs_train.npy')
     imgs_mask_train = np.load('./imgs_mask_train.npy')
 
-    imgs_train = preprocess(imgs_train)
-    imgs_mask_train = preprocess(imgs_mask_train)
+    imgs_train = resize(imgs_train)
+    imgs_mask_train = resize(imgs_mask_train)
 
     imgs_train = imgs_train.astype('float32')
     mean = np.mean(imgs_train)  # mean for data centering
@@ -103,7 +112,7 @@ def train_and_predict():
     print('Loading and preprocessing test data...')
     print('-'*30)
     imgs_test = np.load('./imgs_test.npy')
-    imgs_test = preprocess(imgs_test)
+    imgs_test = resize(imgs_test)
 
     imgs_test = imgs_test.astype('float32')
     imgs_test -= mean
