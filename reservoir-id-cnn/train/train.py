@@ -21,6 +21,7 @@ RESIZE_COLS = 96
 NUM_BANDS = 4
 # Number of bands in image.
 SMOOTH = 1.
+# Dice smoothing factor, don't know what this does.
 
 def dice_coef(y_true, y_pred):
     y_true_f = K.flatten(y_true)
@@ -95,8 +96,8 @@ def train_and_predict():
     print('-'*30)
     print('Loading and preprocessing train data...')
     print('-'*30)
-    imgs_train = np.load('./imgs_train.npy')
-    imgs_mask_train = np.load('./imgs_mask_train.npy')
+    imgs_train = np.load('./data/prepped/imgs_train.npy')
+    imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
 
     imgs_train = img_resize(imgs_train, 4)
     imgs_mask_train = img_resize(imgs_mask_train, 1)
@@ -127,7 +128,7 @@ def train_and_predict():
     print('-'*30)
     print('Loading and preprocessing test data...')
     print('-'*30)
-    imgs_test = np.load('./imgs_test.npy')
+    imgs_test = np.load('./data/prepped/imgs_test.npy')
     imgs_test = img_resize(imgs_test, 4)
 
     imgs_test = imgs_test.astype('float32')
@@ -142,14 +143,21 @@ def train_and_predict():
     print('-'*30)
     print('Predicting masks on test data...')
     print('-'*30)
-    pred_mask_test = model.predict(imgs_test, verbose=1)
-    np.save('imgs_mask_test_predict.npy', imgs_mask_test)
+    pred_test_masks = model.predict(imgs_test, verbose=1)
 
-    i = 0
-    for pred_mask in pred_mask_test:
+    # Save predicted masks
+    predict_dir = './data/predict/'
+    if not os.path.isdir(predict_dir):
+        os.makedirs(predict_dir)
+
+    np.save('{}pred_test_masks.npy'.format(predict_dir), pred_test_masks)
+    test_img_names = open('./data/prepped/test_names.csv').read().splitlines()
+    for i in range(pred_test_masks.shape[0]):
+        pred_mask = pred_test_masks[i]
         pred_mask = pred_mask > 0.5
         pred_mask = (pred_mask[:, :, 0] * 255.).astype(np.uint8)
-        io.imsave('./data/predict/{}_mask.png'.format(i), pred_mask)
+        pred_mask_filename = test_img_names[i].replace('og.tif', 'predmask.png')
+        io.imsave('{}{}'.format(predict_dir, pred_mask_filename), pred_mask)
         i += 1
 
     return

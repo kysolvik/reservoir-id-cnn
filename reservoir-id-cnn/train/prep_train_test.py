@@ -114,10 +114,13 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     imgs_mask_test = imgs_mask[test_indices]
     test_img_names = [og_img_names[i] for i in test_indices]
 
-    np.save('imgs_train.npy', imgs_train)
-    np.save('imgs_mask_train.npy', imgs_mask_train)
-    np.save('imgs_test.npy', imgs_test)
-    np.save('imgs_mask_test.npy', imgs_mask_test)
+    prepped_path = '{}/prepped/'.format(data_path)
+    if not os.path.isdir(prepped_path):
+           os.makedirs(prepped_path)
+    np.save('{}imgs_train.npy'.format(prepped_path), imgs_train)
+    np.save('{}imgs_mask_train.npy'.format(prepped_path), imgs_mask_train)
+    np.save('{}imgs_test.npy'.format(prepped_path), imgs_test)
+    np.save('{}imgs_mask_test.npy'.format(prepped_path), imgs_mask_test)
 
     # Write image names
     with open('./train_names.csv', 'w') as wf:
