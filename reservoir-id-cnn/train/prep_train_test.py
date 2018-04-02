@@ -42,8 +42,7 @@ def save_empty_mask(mask_path, dim_x, dim_y):
     """Writes an all-zeros mask file (png) given dim_x and dim_y"""
 
     mask_array = np.zeros([dim_x,dim_y], dtype=np.uint8)
-    im = Image.fromarray(mask_array)
-    im.save(mask_path)
+    io.imsave(mask_path, mask_array)
 
     return None
 
@@ -109,16 +108,16 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     test_indices = np.delete(np.array(range(total_ims)), train_indices)
 
     imgs_train = imgs[train_indices]
-    imgs_train_mask = imgs_mask[train_indices]
+    imgs_mask_train = imgs_mask[train_indices]
     train_img_names = [og_img_names[i] for i in train_indices]
     imgs_test = imgs[test_indices]
-    imgs_test_mask = imgs_mask[test_indices]
+    imgs_mask_test = imgs_mask[test_indices]
     test_img_names = [og_img_names[i] for i in test_indices]
 
     np.save('imgs_train.npy', imgs_train)
-    np.save('imgs_train_mask.npy', imgs_train_mask)
+    np.save('imgs_mask_train.npy', imgs_mask_train)
     np.save('imgs_test.npy', imgs_test)
-    np.save('imgs_test_mask.npy', imgs_test_mask)
+    np.save('imgs_mask_test.npy', imgs_mask_test)
 
     # Write image names
     with open('./train_names.csv', 'w') as wf:
