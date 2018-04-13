@@ -7,11 +7,12 @@ import os
 from skimage import transform
 import numpy as np
 from keras.models import Model
-from keras.layers import Input, merge, Conv2D, MaxPooling2D, Conv2DTranspose, UpSampling2D
-from keras.optimizers import Adam
+from keras.layers import Input, concatenate, Conv2D, MaxPooling2D, Conv2DTranspose, UpSampling2D
+from keras.optimizers import Adam, SGD
 from keras.callbacks import ModelCheckpoint
 from keras import backend as K
 from skimage import io
+from keras.layers.advanced_activations import LeakyReLU
 
 K.set_image_data_format('channels_last')  # TF dimension ordering in this code
 
@@ -20,7 +21,7 @@ RESIZE_COLS = 256
 # Resized dimensions for training/testing.
 NUM_BANDS = 4
 # Number of bands in image.
-SMOOTH = 1e-10
+SMOOTH = 1e-1
 
 
 def jaccard_coef(y_true, y_pred, smooth=SMOOTH):
@@ -63,52 +64,64 @@ def jaccard_distance_loss(y_true, y_pred, smooth=SMOOTH):
     return (1 - jac) * smooth
 
 
-def get_unet(resize_rows, resize_cols, nbands):
+def dice_coef(y_true, y_pred, smooth=SMOOTH):
+    y_true_f = K.flatten(y_true)
+    y_pred_f = K.flatten(y_pred)
+    intersection = K.sum(y_true_f * y_pred_f)
 
-    inputs = Input((resize_rows, resize_cols, nbands))
-    conv1 = Conv2D(32, 3, 3, activation='relu', border_mode='same')(inputs)
-    conv1 = Conv2D(32, 3, 3, activation='relu', border_mode='same')(conv1)
+    return (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
+
+def dice_coef_loss(y_true, y_pred, smooth=SMOOTH):
+    return -dice_coef(y_true, y_pred)
+
+
+def get_unet(img_rows, img_cols, nbands):
+
+    inputs = Input((img_rows, img_cols, 4))
+    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
+    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
     pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
 
-    conv2 = Conv2D(64, 3, 3, activation='relu', border_mode='same')(pool1)
-    conv2 = Conv2D(64, 3, 3, activation='relu', border_mode='same')(conv2)
+    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(pool1)
+    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv2)
     pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
 
-    conv3 = Conv2D(128, 3, 3, activation='relu', border_mode='same')(pool2)
-    conv3 = Conv2D(128, 3, 3, activation='relu', border_mode='same')(conv3)
+    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same')(pool2)
+    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv3)
     pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
 
-    conv4 = Conv2D(256, 3, 3, activation='relu', border_mode='same')(pool3)
-    conv4 = Conv2D(256, 3, 3, activation='relu', border_mode='same')(conv4)
+    conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(pool3)
+    conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv4)
     pool4 = MaxPooling2D(pool_size=(2, 2))(conv4)
 
-    conv5 = Conv2D(512, 3, 3, activation='relu', border_mode='same')(pool4)
-    conv5 = Conv2D(512, 3, 3, activation='relu', border_mode='same')(conv5)
+    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(pool4)
+    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(conv5)
 
-    up6 = merge([UpSampling2D(size=(2, 2))(conv5), conv4], mode='concat',
-                concat_axis=3)
-    conv6 = Conv2D(256, 3, 3, activation='relu', border_mode='same')(up6)
-    conv6 = Conv2D(256, 3, 3, activation='relu', border_mode='same')(conv6)
+    up6 = concatenate([Conv2DTranspose(256, (2, 2), strides=(2, 2),
+                                       padding='same')(conv5), conv4], axis=3)
+    conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(up6)
+    conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv6)
 
-    up7 = merge([UpSampling2D(size=(2, 2))(conv6), conv3], mode='concat',
-                concat_axis=3)
-    conv7 = Conv2D(128, 3, 3, activation='relu', border_mode='same')(up7)
-    conv7 = Conv2D(128, 3, 3, activation='relu', border_mode='same')(conv7)
+    up7 = concatenate([Conv2DTranspose(128, (2, 2), strides=(2, 2),
+                                       padding='same')(conv6), conv3], axis=3)
+    conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(up7)
+    conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv7)
 
-    up8 = merge([UpSampling2D(size=(2, 2))(conv7), conv2], mode='concat',
-                concat_axis=3)
-    conv8 = Conv2D(64, 3, 3, activation='relu', border_mode='same')(up8)
-    conv8 = Conv2D(64, 3, 3, activation='relu', border_mode='same')(conv8)
+    up8 = concatenate([Conv2DTranspose(64, (2, 2), strides=(2, 2),
+                                       padding='same')(conv7), conv2], axis=3)
+    conv8 = Conv2D(64, (3, 3), activation='relu', padding='same')(up8)
+    conv8 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv8)
 
-    up9 = merge([UpSampling2D(size=(2, 2))(conv8), conv1], mode='concat',
-                concat_axis=3)
-    conv9 = Conv2D(32, 3, 3, activation='relu', border_mode='same')(up9)
-    conv9 = Conv2D(32, 3, 3, activation='relu', border_mode='same')(conv9)
+    up9 = concatenate([Conv2DTranspose(32, (2, 2), strides=(2, 2),
+                                       padding='same')(conv8), conv1], axis=3)
+    conv9 = Conv2D(32, (3, 3), activation='relu', padding='same')(up9)
+    conv9 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv9)
 
     conv10 = Conv2D(1, (1, 1), activation='sigmoid')(conv9)
 
-    model = Model(input=inputs, output=conv10)
-    model.compile(optimizer=Adam(lr=0.000001), loss=jaccard_distance_loss,
+    model = Model(inputs=[inputs], outputs=[conv10])
+
+    model.compile(optimizer=Adam(lr=0.00001), loss=dice_coef_loss,
                   metrics=[jaccard_coef, jaccard_coef_int, 'accuracy'])
 
     return model
@@ -133,14 +146,14 @@ def train_and_predict():
     imgs_train = np.load('./data/prepped/imgs_train.npy')
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
 
-    null_masks = np.ones(imgs_mask_train.shape[0], dtype=bool)
-    for i in range(imgs_mask_train.shape[0]):
-        max_mask = np.max(imgs_mask_train[i,:,:])
-        if max_mask < 255:
-            null_masks[i] = 0
-
-    imgs_train = imgs_train[null_masks]
-    imgs_mask_train = imgs_mask_train[null_masks]
+#     null_masks = np.ones(imgs_mask_train.shape[0], dtype=bool)
+#     for i in range(imgs_mask_train.shape[0]):
+#         max_mask = np.max(imgs_mask_train[i,:,:])
+#         if max_mask < 255:
+#             null_masks[i] = 0
+#
+#     imgs_train = imgs_train[null_masks]
+#     imgs_mask_train = imgs_mask_train[null_masks]
 
     imgs_train = img_resize(imgs_train, 4)
     imgs_mask_train = img_resize(imgs_mask_train, 1)
@@ -166,7 +179,7 @@ def train_and_predict():
     print('Fitting model...')
     print('-'*30)
 
-    model.fit(imgs_train, imgs_mask_train, batch_size=32, epochs=20,
+    model.fit(imgs_train, imgs_mask_train, batch_size=4, epochs=20,
               verbose=1, shuffle=True, validation_split=0.2,
               callbacks=[model_checkpoint])
 
@@ -199,7 +212,8 @@ def train_and_predict():
     test_img_names = open('./data/prepped/test_names.csv').read().splitlines()
     for i in range(pred_test_masks.shape[0]):
         pred_mask = pred_test_masks[i]
-        pred_mask = pred_mask > 0.6
+        print(np.min(pred_mask), np.max(pred_mask))
+        pred_mask = pred_mask > 0.51
         pred_mask = (pred_mask[:, :, 0] * 255.).astype(np.uint8)
         pred_mask_filename = test_img_names[i].replace('og.tif', 'predmask.png')
         io.imsave('{}{}'.format(predict_dir, pred_mask_filename), pred_mask)
