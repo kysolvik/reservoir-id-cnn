@@ -20,12 +20,30 @@ import numpy as np
 from PIL import Image
 from skimage import io
 import random
+import argparse
+
+
+def argparse_init():
+    """Prepare ArgumentParser for inputs."""
+
+    p = argparse.ArgumentParser(
+            description='Prepare images and masks for training and testing.',
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    p.add_argument('labelbox_json',
+                   help='Path to LabelBox exported JSON.',
+                   type=str)
+    p.add_argument('--no_download',
+                   help='Skip download step, just do ingestion.',
+                   default=False,
+                   action='store_true')
+    return p
 
 
 def find_ims_masks(labelbox_json):
     """Finds locations of images and masks from labelbox-generated json."""
 
     label_df = pd.read_json(labelbox_json, orient='records')
+    label_df = label_df.loc[label_df['Masks'].notna()]
 
     # URLs for original images
     og_urls = label_df['Labeled Data'].replace('ndwi.png', 'og.tif', regex=True)
@@ -47,7 +65,7 @@ def save_empty_mask(mask_path, dim_x, dim_y):
     return None
 
 
-def download_im_mask_pair(og_url, mask_url, destination_dir,
+def download_im_mask_pair(og_url, mask_url, destination_dir='./data/',
                           dim_x=500, dim_y=500):
     """Downloads original image and mask, renaming mask to match image."""
 
@@ -123,10 +141,10 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     np.save('{}imgs_mask_test.npy'.format(prepped_path), imgs_mask_test)
 
     # Write image names
-    with open('./train_names.csv', 'w') as wf:
+    with open('{}train_names.csv'.format(prepped_path), 'w') as wf:
         for img_name in train_img_names:
             wf.write('{}\n'.format(img_name))
-    with open('./test_names.csv', 'w') as wf:
+    with open('{}test_names.csv'.format(prepped_path), 'w') as wf:
         for img_name in test_img_names:
             wf.write('{}\n'.format(img_name))
 
@@ -134,3 +152,21 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
 
     return
 
+
+def main():
+
+    # Get command line args
+    parser = argparse_init()
+    args = parser.parse_args()
+
+    if not args.no_download:
+        og_mask_tuples = find_ims_masks(args.labelbox_json)
+        for og_mask_pair in og_mask_tuples:
+            download_im_mask_pair(og_mask_pair[0], og_mask_pair[1])
+
+    create_train_test_data()
+    return
+
+
+if __name__=='__main__':
+    main()
