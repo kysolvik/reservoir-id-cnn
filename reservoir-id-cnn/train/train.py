@@ -133,6 +133,15 @@ def train_and_predict():
     imgs_train = np.load('./data/prepped/imgs_train.npy')
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
 
+    null_masks = np.ones(imgs_mask_train.shape[0], dtype=bool)
+    for i in range(imgs_mask_train.shape[0]):
+        max_mask = np.max(imgs_mask_train[i,:,:])
+        if max_mask < 255:
+            null_masks[i] = 0
+
+    imgs_train = imgs_train[null_masks]
+    imgs_mask_train = imgs_mask_train[null_masks]
+
     imgs_train = img_resize(imgs_train, 4)
     imgs_mask_train = img_resize(imgs_mask_train, 1)
 
@@ -157,8 +166,6 @@ def train_and_predict():
     print('Fitting model...')
     print('-'*30)
 
-    for i in range(imgs_mask_train.shape[0]):
-        print(np.sum(imgs_mask_train[i,:,:]))
     model.fit(imgs_train, imgs_mask_train, batch_size=32, epochs=20,
               verbose=1, shuffle=True, validation_split=0.2,
               callbacks=[model_checkpoint])
