@@ -5,15 +5,11 @@
 These functions download and prepare the training/test images and their
 labels/masks. Prepares them for ingestion into model.
 
-Notes:
-    Some functions/code taken from:
-    https://github.com/GoogleCloudPlatform/python-docs-samples/blob/master/storage/cloud-client/snippets.py
-
 """
 
 
-from google.cloud import storage
 import pandas as pd
+import subprocess as sp
 import os
 import urllib.request
 import numpy as np
@@ -72,7 +68,9 @@ def download_im_mask_pair(og_url, mask_url, destination_dir='./data/',
     og_dest_file = '{}/{}'.format(destination_dir, os.path.basename(og_url))
     mask_dest_file = og_dest_file.replace('og.tif', 'mask.png')
 
-    urllib.request.urlretrieve(og_url, filename=og_dest_file)
+    # Download og file from google cloud storage using gsutil
+    og_gs_path = og_url.replace('https://storage.googleapis.com/', 'gs://')
+    sp.call(['gsutil', 'cp', og_gs_path, og_dest_file])
 
     if mask_url is None:
         save_empty_mask(mask_dest_file, dim_x, dim_y)
