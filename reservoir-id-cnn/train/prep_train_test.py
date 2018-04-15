@@ -50,7 +50,12 @@ def find_ims_masks(labelbox_json):
 
     og_mask_tuples = zip(og_urls, mask_urls)
 
-    return og_mask_tuples
+    # Find the bucket name
+    sample_og_url = og_urls[0]
+    og_gs_path = sample_og_url.replace('https://storage.googleapis.com/', '')
+    gs_bucket_name = og_gs_path.split('/')[0]
+
+    return og_mask_tuples, gs_bucket_name
 
 
 def save_empty_mask(mask_path, dim_x, dim_y):
@@ -62,14 +67,16 @@ def save_empty_mask(mask_path, dim_x, dim_y):
     return None
 
 
-def download_im_mask_pair(og_url, mask_url, gs_bucket, destination_dir='./data/',
-                          dim_x=500, dim_y=500):
+def download_im_mask_pair(og_url, mask_url, gs_bucket,
+                          destination_dir='./data/', dim_x=500, dim_y=500):
     """Downloads original image and mask, renaming mask to match image."""
 
     og_dest_file = '{}/{}'.format(destination_dir, os.path.basename(og_url))
     mask_dest_file = og_dest_file.replace('og.tif', 'mask.png')
 
     # Download og file from google cloud storage using gsutil
+    og_gs_path = og_url.replace('https://storage.googleapis.com/{}/'
+                                .format(gs_bucket.name), '')
     blob = gs_bucket.blob(og_gs_path)
     blob.download_to_filename(og_dest_file)
 
@@ -160,12 +167,9 @@ def main():
 
 
     if not args.no_download:
-        og_mask_tuples = find_ims_masks(args.labelbox_json)
+        og_mask_tuples, gs_bucket_name = find_ims_masks(args.labelbox_json)
 
         # Initiate bucket, first stripping bucket name from URL.
-        sample_og_url = og_mask_tuples[0][0]
-        og_gs_path = sample_og_url.replace('https://storage.googleapis.com/', '')
-        gs_bucket_name = og_gs_path.split('/')[0]
         storage_client = storage.Client()
         gs_bucket = storage_client.get_bucket(gs_bucket_name)
         for og_mask_pair in og_mask_tuples:
