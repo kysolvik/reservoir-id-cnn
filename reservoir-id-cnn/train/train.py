@@ -9,7 +9,7 @@ import numpy as np
 from keras.models import Model
 from keras.layers import Input, concatenate, Conv2D, MaxPooling2D, Conv2DTranspose, UpSampling2D
 from keras.optimizers import Adam, SGD
-from keras.callbacks import ModelCheckpoint
+from keras.callbacks import ModelCheckpoint, TensorBoard
 from keras import backend as K
 from skimage import io
 
@@ -19,10 +19,14 @@ OG_ROWS = 500
 OG_COLS = 500
 # Original image dimensions
 
+RESIZE_ROWS = 512
+RESIZE_COLS = 512
+# Resized dimensions for training/testing.
+
 NUM_BANDS = 4
 # Number of bands in image.
 
-SMOOTH = 1e-1
+SMOOTH = 1.
 # Smoothing factor for jaccard_coef
 
 PRED_THRESHOLD = 0.5
@@ -49,7 +53,7 @@ def jaccard_coef_int(y_true, y_pred, smooth=SMOOTH):
     return K.mean(jac)
 
 
-def jaccard_distance_loss(y_true, y_pred, smooth=SMOOTH):
+def jaccard_distance_loss(y_true, y_pred, smooth=100):
     """
     Jaccard = (|X & Y|)/ (|X|+ |Y| - |X & Y|)
             = sum(|A*B|)/(sum(|A|)+sum(|B|)-sum(|A*B|))
@@ -69,7 +73,7 @@ def jaccard_distance_loss(y_true, y_pred, smooth=SMOOTH):
     return (1 - jac) * smooth
 
 
-def stretch_n(bands, lower_percent=1, higher_percent=99):
+def stretch_n(bands, lower_percent=0, higher_percent=100):
     out = np.zeros_like(bands)
     n = bands.shape[2]
     for i in range(n):
@@ -91,13 +95,14 @@ def dice_coef(y_true, y_pred, smooth=SMOOTH):
 
     return (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
 
-def dice_coef_loss(y_true, y_pred, smooth=SMOOTH):
+
+def dice_coef_loss(y_true, y_pred):
     return -dice_coef(y_true, y_pred)
 
 
 def get_unet(img_rows, img_cols, nbands):
 
-    inputs = Input((img_rows, img_cols, 4))
+    inputs = Input((img_rows, img_cols, nbands))
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
     pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
@@ -142,9 +147,21 @@ def get_unet(img_rows, img_cols, nbands):
     model = Model(inputs=[inputs], outputs=[conv10])
 
     model.compile(optimizer=Adam(lr=1e-5), loss=dice_coef_loss,
-                  metrics=[jaccard_coef, jaccard_coef_int, 'accuracy'])
+                  metrics=[jaccard_coef, jaccard_coef_int, dice_coef,
+                           'accuracy'])
 
     return model
+
+
+def resize_imgs(imgs, nbands):
+    imgs_p = np.ndarray((imgs.shape[0], RESIZE_ROWS, RESIZE_COLS, nbands))
+
+    for i in range(imgs.shape[0]):
+        imgs_p[i] = transform.resize(imgs[i],
+                                     (RESIZE_ROWS, RESIZE_COLS, nbands),
+                                     preserve_range = True)
+
+    return imgs_p
 
 
 def train_and_predict():
@@ -154,12 +171,13 @@ def train_and_predict():
     imgs_train = np.load('./data/prepped/imgs_train.npy')
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
 
+    imgs_train = resize_imgs(imgs_train, 4)
+    imgs_mask_train = resize_imgs(imgs_mask_train, 1)
+
     imgs_train = imgs_train.astype('float32')
     mean = np.mean(imgs_train)  # mean for data centering
     std = np.std(imgs_train)  # std for data normalization
 
-#     imgs_train -= mean
-#     imgs_train /= std
     for i in range(imgs_train.shape[0]):
         imgs_train[i] = stretch_n(imgs_train[i])
 
@@ -169,17 +187,19 @@ def train_and_predict():
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
-    model = get_unet(OG_ROWS, OG_COLS, NUM_BANDS)
+    model = get_unet(RESIZE_ROWS, RESIZE_COLS, NUM_BANDS)
     model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_loss',
                                        save_best_only=True)
+    tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
+                              write_images=True)
 
     print('-'*30)
     print('Fitting model...')
     print('-'*30)
 
-    model.fit(imgs_train, imgs_mask_train, batch_size=8, epochs=20,
+    model.fit(imgs_train, imgs_mask_train, batch_size=8, epochs=150,
               verbose=1, shuffle=True, validation_split=0.2,
-              callbacks=[model_checkpoint])
+              callbacks=[model_checkpoint, tensorboard])
 
     print('-'*30)
     print('Loading and preprocessing test data...')
@@ -187,11 +207,11 @@ def train_and_predict():
     imgs_test = np.load('./data/prepped/imgs_test.npy')
     imgs_mask_test = np.load('./data/prepped/imgs_mask_test.npy')
 
+    imgs_test = resize_imgs(imgs_test, 4)
+
     imgs_test = imgs_test.astype('float32')
     for i in range(imgs_test.shape[0]):
         imgs_test[i] = stretch_n(imgs_test[i])
-#     imgs_test -= mean
-#     imgs_test /= std
 
     print('-'*30)
     print('Loading saved weights...')
@@ -219,6 +239,9 @@ def train_and_predict():
         pred_mask = pred_test_masks[i]
         true_mask = imgs_mask_test[i]
         print(np.min(pred_mask), np.max(pred_mask))
+        pred_mask = transform.resize(pred_mask,
+                                     (OG_ROWS, OG_COLS, 1),
+                                     preserve_range = True)
         pred_mask = (pred_mask[:, :, 0] * 255.).astype(np.uint8)
 
         # Save predicted masks
