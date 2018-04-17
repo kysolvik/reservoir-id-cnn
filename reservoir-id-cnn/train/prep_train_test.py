@@ -16,6 +16,7 @@ import urllib.request
 import numpy as np
 from PIL import Image
 from skimage import io
+from skimage import morphology
 import random
 import argparse
 
@@ -101,7 +102,7 @@ def add_ndwi(imgs):
 
 
 def download_im_mask_pair(og_url, mask_url, gs_bucket,
-                          destination_dir='./data/', dim_x=500, dim_y=500):
+                          destination_dir='./data_foo/', dim_x=500, dim_y=500):
     """Downloads original image and mask, renaming mask to match image."""
 
     og_dest_file = '{}/{}'.format(destination_dir, os.path.basename(og_url))
@@ -121,7 +122,15 @@ def download_im_mask_pair(og_url, mask_url, gs_bucket,
     return None
 
 
-def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
+def pad_mask(img_mask):
+    """To increase area of predicted res, dilate training masks."""
+
+    img_mask_padded = morphology.binary_dilation(img_mask)
+
+    return img_mask_padded
+
+
+def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data_foo/',
                            test_frac=0.2):
     """Save training and test data into easy .npy file"""
     images = os.listdir(data_path)
@@ -172,6 +181,10 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     imgs_test = imgs[test_indices]
     imgs_mask_test = imgs_mask[test_indices]
     test_img_names = [og_img_names[i] for i in test_indices]
+
+    # Pad training masks
+    for i in range(imgs_mask_train.shape[0]):
+        imgs_mask_train[i] = pad_mask(img_mask)
 
     prepped_path = '{}/prepped/'.format(data_path)
     if not os.path.isdir(prepped_path):
