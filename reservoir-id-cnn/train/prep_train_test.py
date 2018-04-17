@@ -67,6 +67,39 @@ def save_empty_mask(mask_path, dim_x, dim_y):
     return None
 
 
+def normalized_diff(ar1, ar2):
+    """Returns normalized difference of two arrays."""
+
+    # Convert arrays to float32
+    ar1 = ar1.astype('float32')
+    ar2 = ar2.astype('float32')
+
+    return((ar1 - ar2) / (ar1 + ar2))
+
+
+def add_ndwi(imgs):
+    """Add band containing NDWI."""
+
+    ndwi = normalized_diff(imgs[:,:,:,1], imgs[:,:,:,3])
+    print(ndwi.shape)
+
+    # Convert to uint16
+    nd_min = ndwi.min()
+    nd_max = ndwi.max()
+    ndwi = 65535 * (ndwi - nd_min) / (nd_max - nd_min)
+    ndwi = ndwi.astype(np.uint16)
+
+    # Reshape
+    ndwi = np.reshape(ndwi, np.append(np.asarray(ndwi.shape), 1))
+    print(imgs.shape)
+    print(ndwi.shape)
+
+    # Append ndwi to imgs
+    imgs_wndwi = np.append(imgs, ndwi, axis=3)
+
+    return imgs_wndwi
+
+
 def download_im_mask_pair(og_url, mask_url, gs_bucket,
                           destination_dir='./data/', dim_x=500, dim_y=500):
     """Downloads original image and mask, renaming mask to match image."""
@@ -105,7 +138,6 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     for image_name in images:
         if 'mask' in image_name:
             continue
-        print(image_name)
         image_mask_name = image_name.replace('og.tif', 'mask.png')
         img = io.imread(os.path.join(data_path, image_name), as_grey=False)
         img_mask = io.imread(os.path.join(data_path, image_mask_name),
@@ -124,6 +156,9 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
         og_img_names += [image_name]
 
     print('Loading done.')
+
+    # Add NDWI band
+    imgs = add_ndwi(imgs)
 
     # Split into training, test.
     total_ims = imgs.shape[0]
