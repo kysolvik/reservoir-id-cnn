@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """Extract subset images for annotation
 
-This script extracts subset images from a large geoTiff. These images can then 
+This script extracts subset images from a large geoTiff. These images can then
 be annotated to create training/test data for the CNN.
 
 Example:
-    Create 5 10x10 sub-images of raster 'eg.tif': 
+    Create 5 10x10 sub-images of raster 'eg.tif':
     $ python3 extract_subarrays.py eg.tif 5 10 10 out/ --out_prefix='eg_sub_'
 
 Notes:
@@ -112,7 +112,7 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
                     num_subsets)
     sub_ymins = np.random.random_integers(0, vis_im.shape[1] - (dim_y + 1),
                     num_subsets)
-    
+
     # Get xmaxs and ymaxs
     sub_xmaxs = sub_xmins + dim_x
     sub_ymaxs = sub_ymins + dim_y
@@ -121,15 +121,15 @@ def subset_image(vis_im, og_im, num_subsets, dim_x, dim_y, out_dir,
     source_geotrans = gdal.Open(source_path).GetGeoTransform()
 
     # Get Google maps link
-    sub_gmaps_links = create_gmaps_link(sub_xmins, sub_ymins, sub_xmaxs, 
+    sub_gmaps_links = create_gmaps_link(sub_xmins, sub_ymins, sub_xmaxs,
                                         sub_ymaxs, source_geotrans)
 
     # Create and save csv containing grid coordinates for images
     grid_indices_df = pd.DataFrame({
-        'name': ['{}{}_ndwi'.format(out_prefix,snum) 
+        'name': ['{}{}_ndwi'.format(out_prefix,snum)
                     for snum in range(0,num_subsets)],
         'source': os.path.basename(source_path),
-        'xmin': sub_xmins, 
+        'xmin': sub_xmins,
         'xmax': sub_xmaxs,
         'ymin': sub_ymins,
         'ymax': sub_ymaxs,
@@ -177,10 +177,10 @@ def main():
 
     # Get subsets
     subset_image(base_image_bandselect, base_image, args.num_subsets,
-        args.subset_dim_x,args.subset_dim_y, 
+        args.subset_dim_x,args.subset_dim_y,
         args.out_dir, args.source_path, args.out_prefix)
 
-    return()  
+    return()
 
 
 if __name__ == '__main__':
