@@ -19,6 +19,7 @@ from skimage import io
 from skimage import morphology
 import random
 import argparse
+import augment_data as augment
 
 
 def argparse_init():
@@ -186,6 +187,16 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
 #     for i in range(imgs_mask_train.shape[0]):
 #         imgs_mask_train[i] = pad_mask(imgs_mask_train[i])
 #     imgs_mask_train *= 255
+
+    # Augment training data
+    new_imgs = np.zeros_like(imgs_train)
+    new_masks = np.zeros_like(imgs_mask_train)
+    for i in range(imgs_train.shape[0]):
+        new_images[i], new_masks[i] = augment.random_aug(
+            imgs_train[i],
+            imgs_mask_train[i])
+    imgs_train = np.vstack((imgs_train, new_images))
+    imgs_mask_train = np.vstack((imgs_mask_train, new_masks))
 
     prepped_path = '{}/prepped/'.format(data_path)
     if not os.path.isdir(prepped_path):

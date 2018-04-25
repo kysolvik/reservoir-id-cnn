@@ -121,7 +121,7 @@ def dice_coef_wgt(y_true, y_pred, smooth=SMOOTH):
 
 
 def dice_coef_loss(y_true, y_pred):
-    return -dice_coef_wgt(y_true, y_pred)
+    return -dice_coef(y_true, y_pred)
 
 
 def get_unet(img_rows, img_cols, nbands):
@@ -203,14 +203,16 @@ def train_and_predict():
     mean = np.mean(imgs_train)  # mean for data centering
     std = np.std(imgs_train)  # std for data normalization
 
-    for i in range(imgs_train.shape[0]):
-        imgs_train[i] = stretch_n(imgs_train[i])
+#     for i in range(imgs_train.shape[0]):
+#         imgs_train[i] = stretch_n(imgs_train[i])
+    imgs_train -= mean
+    imgs_train /= std
 
     imgs_mask_train = imgs_mask_train.astype('float32')
 
     imgs_mask_train /= 255.  # scale masks to [0, 1]
-    imgs_mask_train[imgs_mask_train >= 0.5] = 1
-    imgs_mask_train[imgs_mask_train < 0.5] = 0
+    imgs_mask_train[imgs_mask_train >= 0.1] = 1
+    imgs_mask_train[imgs_mask_train < 0.1] = 0
 
     print('-'*30)
     print('Creating and compiling model...')
@@ -222,7 +224,7 @@ def train_and_predict():
                                        save_best_only=True)
     tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
                               write_images=True)
-    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=10,
+    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=8,
                                    verbose=0, mode='auto')
 
 
@@ -243,8 +245,10 @@ def train_and_predict():
     imgs_test = resize_imgs(imgs_test, NUM_BANDS)
 
     imgs_test = imgs_test.astype('float32')
-    for i in range(imgs_test.shape[0]):
-        imgs_test[i] = stretch_n(imgs_test[i])
+    imgs_test -= mean
+    imgs_test /= std
+#     for i in range(imgs_test.shape[0]):
+#         imgs_test[i] = stretch_n(imgs_test[i])
 
     print('-'*30)
     print('Loading saved weights...')
@@ -276,16 +280,14 @@ def train_and_predict():
         ndwi_img = imgs_test[i,:,:,4]
         ndwi_img = transform.resize(ndwi_img,
                                     (OG_ROWS, OG_COLS),
-                                    preserve_range = True,
-                                    anti_aliasing=True)
+                                    preserve_range = True)
         ndwi_img = scale_image_tobyte(ndwi_img)
         ndwi_img = ndwi_img.astype('uint8')
 
         print(np.min(pred_mask), np.max(pred_mask))
         pred_mask = transform.resize(pred_mask,
                                      (OG_ROWS, OG_COLS),
-                                     preserve_range = True,
-                                     anti_aliasing=True)
+                                     preserve_range = True)
         pred_mask = (pred_mask[:, :, 0] * 255.).astype(np.uint8)
 
         # Save predicted masks
