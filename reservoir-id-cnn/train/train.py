@@ -9,7 +9,7 @@ import numpy as np
 from keras.models import Model
 from keras.layers import Input, concatenate, Conv2D, MaxPooling2D, Conv2DTranspose, UpSampling2D
 from keras.optimizers import Adam, SGD
-from keras.callbacks import ModelCheckpoint, TensorBoard
+from keras.callbacks import ModelCheckpoint, TensorBoard, EarlyStopping
 from keras import backend as K
 from skimage import io
 
@@ -23,7 +23,7 @@ RESIZE_ROWS = 512
 RESIZE_COLS = 512
 # Resized dimensions for training/testing.
 
-NUM_BANDS = 4
+NUM_BANDS = 6
 # Number of bands in image.
 
 SMOOTH = 1.
@@ -73,6 +73,19 @@ def jaccard_distance_loss(y_true, y_pred, smooth=100):
     return (1 - jac) * smooth
 
 
+
+def scale_image_tobyte(ar):
+    """Scale larger data type array to byte"""
+
+    min_val = np.min(ar)
+    max_val = np.max(ar)
+    byte_ar = np.round(255.0 * (ar - min_val) / (max_val - min_val)) \
+        .astype(np.uint8)
+    byte_ar[ar == 0] = 0
+
+    return(byte_ar)
+
+
 def stretch_n(bands, lower_percent=0, higher_percent=100):
     out = np.zeros_like(bands)
     n = bands.shape[2]
@@ -88,6 +101,7 @@ def stretch_n(bands, lower_percent=0, higher_percent=100):
 
     return out.astype(np.float32)
 
+
 def dice_coef(y_true, y_pred, smooth=SMOOTH):
     y_true_f = K.flatten(y_true)
     y_pred_f = K.flatten(y_pred)
@@ -96,8 +110,18 @@ def dice_coef(y_true, y_pred, smooth=SMOOTH):
     return (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
 
 
+def dice_coef_wgt(y_true, y_pred, smooth=SMOOTH):
+    y_true_f = K.flatten(y_true)
+    y_pred_f = K.flatten(y_pred)
+    weights = K.cast(K.greater(y_true_f, 0.5), dtype='float32')
+    weights = weights + K.ones_like(weights)
+    intersection = K.sum(y_true_f * y_pred_f * weights)
+
+    return (2. * intersection + smooth) / (K.sum(y_true_f * weights) + K.sum(y_pred_f * weights) + smooth)
+
+
 def dice_coef_loss(y_true, y_pred):
-    return -dice_coef(y_true, y_pred)
+    return -dice_coef_wgt(y_true, y_pred)
 
 
 def get_unet(img_rows, img_cols, nbands):
@@ -146,8 +170,9 @@ def get_unet(img_rows, img_cols, nbands):
 
     model = Model(inputs=[inputs], outputs=[conv10])
 
-    model.compile(optimizer=Adam(lr=1e-5), loss=dice_coef_loss,
-                  metrics=[jaccard_coef, jaccard_coef_int, dice_coef,
+    model.compile(optimizer=Adam(lr=1e-5),
+                  loss=dice_coef_loss,
+                  metrics=[jaccard_coef, dice_coef,
                            'accuracy'])
 
     return model
@@ -171,7 +196,7 @@ def train_and_predict():
     imgs_train = np.load('./data/prepped/imgs_train.npy')
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
 
-    imgs_train = resize_imgs(imgs_train, 4)
+    imgs_train = resize_imgs(imgs_train, NUM_BANDS)
     imgs_mask_train = resize_imgs(imgs_mask_train, 1)
 
     imgs_train = imgs_train.astype('float32')
@@ -182,24 +207,32 @@ def train_and_predict():
         imgs_train[i] = stretch_n(imgs_train[i])
 
     imgs_mask_train = imgs_mask_train.astype('float32')
+
     imgs_mask_train /= 255.  # scale masks to [0, 1]
+    imgs_mask_train[imgs_mask_train >= 0.5] = 1
+    imgs_mask_train[imgs_mask_train < 0.5] = 0
 
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
     model = get_unet(RESIZE_ROWS, RESIZE_COLS, NUM_BANDS)
+
+    # Setup callbacks
     model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_loss',
                                        save_best_only=True)
     tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
                               write_images=True)
+    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=10,
+                                   verbose=0, mode='auto')
+
 
     print('-'*30)
     print('Fitting model...')
     print('-'*30)
 
-    model.fit(imgs_train, imgs_mask_train, batch_size=8, epochs=150,
+    model.fit(imgs_train, imgs_mask_train, batch_size=8, epochs=500,
               verbose=1, shuffle=True, validation_split=0.2,
-              callbacks=[model_checkpoint, tensorboard])
+              callbacks=[model_checkpoint, tensorboard, early_stopping])
 
     print('-'*30)
     print('Loading and preprocessing test data...')
@@ -207,7 +240,7 @@ def train_and_predict():
     imgs_test = np.load('./data/prepped/imgs_test.npy')
     imgs_mask_test = np.load('./data/prepped/imgs_mask_test.npy')
 
-    imgs_test = resize_imgs(imgs_test, 4)
+    imgs_test = resize_imgs(imgs_test, NUM_BANDS)
 
     imgs_test = imgs_test.astype('float32')
     for i in range(imgs_test.shape[0]):
@@ -221,7 +254,7 @@ def train_and_predict():
     print('-'*30)
     print('Predicting masks on test data...')
     print('-'*30)
-    pred_test_masks = model.predict(imgs_test, verbose=1)
+    pred_test_masks = model.predict(imgs_test, batch_size=8, verbose=1)
 
     # Save predicted masks
     predict_dir = './data/predict/'
@@ -238,22 +271,34 @@ def train_and_predict():
     for i in range(pred_test_masks.shape[0]):
         pred_mask = pred_test_masks[i]
         true_mask = imgs_mask_test[i]
+
+        # Get ndwi as byte
+        ndwi_img = imgs_test[i,:,:,4]
+        ndwi_img = transform.resize(ndwi_img,
+                                    (OG_ROWS, OG_COLS),
+                                    preserve_range = True,
+                                    anti_aliasing=True)
+        ndwi_img = scale_image_tobyte(ndwi_img)
+        ndwi_img = ndwi_img.astype('uint8')
+
         print(np.min(pred_mask), np.max(pred_mask))
         pred_mask = transform.resize(pred_mask,
-                                     (OG_ROWS, OG_COLS, 1),
-                                     preserve_range = True)
+                                     (OG_ROWS, OG_COLS),
+                                     preserve_range = True,
+                                     anti_aliasing=True)
         pred_mask = (pred_mask[:, :, 0] * 255.).astype(np.uint8)
 
         # Save predicted masks
         pred_mask_filename = test_img_names[i].replace('og.tif', 'predmask.png')
         io.imsave('{}{}'.format(predict_dir, pred_mask_filename), pred_mask)
 
-        # Save predicted and actual masks side by side
-        both_mask_filename = test_img_names[i].replace('og.tif', 'bothmask.png')
-        both_mask = np.zeros((OG_ROWS, OG_COLS * 2 + 10), dtype=np.uint8)
-        both_mask[0:OG_ROWS, 0:OG_COLS] = pred_mask
-        both_mask[0:OG_ROWS, (OG_COLS + 10):(OG_COLS * 2 + 10)] = true_mask
-        io.imsave('{}{}'.format(predict_dir, both_mask_filename), both_mask)
+        # Save NDWI, predicted mask, and actual masks side by side
+        compare_filename = test_img_names[i].replace('og.tif', 'results.png')
+        compare_im = 255 * np.ones((OG_ROWS, OG_COLS * 3 + 20), dtype=np.uint8)
+        compare_im[0:OG_ROWS, 0:OG_COLS] = ndwi_img
+        compare_im[0:OG_ROWS, (OG_COLS + 10):(OG_COLS * 2 + 10)] = true_mask
+        compare_im[0:OG_ROWS, (OG_COLS * 2 + 20):] = pred_mask
+        io.imsave('{}{}'.format(predict_dir, compare_filename), compare_im)
 
         # Calculate basic error
         pred_mask = 255*(pred_mask > (PRED_THRESHOLD*255)) # move this to earlier

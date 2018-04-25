@@ -78,31 +78,28 @@ def normalized_diff(ar1, ar2):
     return((ar1 - ar2) / (ar1 + ar2))
 
 
-def add_ndwi(imgs):
+def add_nd(imgs, band1, band2):
     """Add band containing NDWI."""
 
-    ndwi = normalized_diff(imgs[:,:,:,1], imgs[:,:,:,3])
-    print(ndwi.shape)
+    nd = normalized_diff(imgs[:,:,:,band1], imgs[:,:,:,band2])
 
     # Convert to uint16
-    nd_min = ndwi.min()
-    nd_max = ndwi.max()
-    ndwi = 65535 * (ndwi - nd_min) / (nd_max - nd_min)
-    ndwi = ndwi.astype(np.uint16)
+    nd_min = nd.min()
+    nd_max = nd.max()
+    nd = 65535 * (nd - nd_min) / (nd_max - nd_min)
+    nd = nd.astype(np.uint16)
 
     # Reshape
-    ndwi = np.reshape(ndwi, np.append(np.asarray(ndwi.shape), 1))
-    print(imgs.shape)
-    print(ndwi.shape)
+    nd = np.reshape(nd, np.append(np.asarray(nd.shape), 1))
 
-    # Append ndwi to imgs
-    imgs_wndwi = np.append(imgs, ndwi, axis=3)
+    # Append nd to imgs
+    imgs_wnd = np.append(imgs, nd, axis=3)
 
-    return imgs_wndwi
+    return imgs_wnd
 
 
 def download_im_mask_pair(og_url, mask_url, gs_bucket,
-                          destination_dir='./data_foo/', dim_x=500, dim_y=500):
+                          destination_dir='./data/', dim_x=500, dim_y=500):
     """Downloads original image and mask, renaming mask to match image."""
 
     og_dest_file = '{}/{}'.format(destination_dir, os.path.basename(og_url))
@@ -130,7 +127,7 @@ def pad_mask(img_mask):
     return img_mask_padded
 
 
-def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data_foo/',
+def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
                            test_frac=0.2):
     """Save training and test data into easy .npy file"""
     images = os.listdir(data_path)
@@ -167,7 +164,10 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data_foo
     print('Loading done.')
 
     # Add NDWI band
-    imgs = add_ndwi(imgs)
+    imgs = add_nd(imgs, 1, 3)
+
+    # Add NDVI band
+    imgs = add_nd(imgs, 3, 2)
 
     # Split into training, test.
     total_ims = imgs.shape[0]
@@ -182,9 +182,10 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data_foo
     imgs_mask_test = imgs_mask[test_indices]
     test_img_names = [og_img_names[i] for i in test_indices]
 
-    # Pad training masks
-    for i in range(imgs_mask_train.shape[0]):
-        imgs_mask_train[i] = pad_mask(img_mask)
+#     # Pad training masks
+#     for i in range(imgs_mask_train.shape[0]):
+#         imgs_mask_train[i] = pad_mask(imgs_mask_train[i])
+#     imgs_mask_train *= 255
 
     prepped_path = '{}/prepped/'.format(data_path)
     if not os.path.isdir(prepped_path):
