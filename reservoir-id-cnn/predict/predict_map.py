@@ -16,8 +16,9 @@ import os.path
 import argparse
 import numpy as np
 import pandas as pd
-from skimage import io
+from skimage import io, transform
 import rasterio
+import affine
 from keras import models
 
 DIM_X = 500
@@ -28,8 +29,8 @@ RESIZE_ROWS = 512
 RESIZE_COLS = 512
 # Inputs unet size
 
-NBANDS = 6
-# Number of bands for unet
+NBANDS = 4
+# Number of bands in original image
 
 OVERLAP = 100
 # Overlap size, in pixels.
@@ -102,31 +103,36 @@ class ResPredictBatch(object):
 
     @property
     def crs(self):
-        self.src_img.crs
+        self.img_src.crs
 
 
     def get_geotransform(self, indice_pair):
         """Calculate geotransform of a tile.
 
+        Notes:
+            Using .affine instead of .transform because it should work with all
+            rasterio > 0.9. See https://github.com/mapbox/rasterio/issues/86.
+
         Args:
             indice_pair (tuple): Row, Col indices of upper left corner of tile.
 
         """
-        geo = self.src_img.transform
+        geo = self.img_src.affine
         new_upperleft = geo * indice_pair
-        geo[2] = new_upperleft[0]
-        geo[5] = new_upperleft[1]
 
-        return geo
+        new_geo = affine.Affine(geo[0], geo[1], new_upperleft[0],
+                                geo[3], geo[4], new_upperleft[1])
+
+        return new_geo
 
 
     def load_images(self):
-        self.imgs = np.empty((self.batch_size, self.dims[0], self.dims[1],
-                              self.nbands))
+        self.imgs = np.empty((self.batch_size, self.nbands,
+                              self.dims[0], self.dims[1]))
         for i in range(self.batch_size):
             row, col = self.start_indices[i,0], self.start_indices[i,1]
-            self.imgs[i] = self.img_src.read(window=((row, row + self.dim_x),
-                                                     (col, col + self.dim_y)))
+            self.imgs[i] = self.img_src.read(window=((row, row + self.dims[0]),
+                                                     (col, col + self.dims[1])))
 
 
     def add_nd(self, band1, band2):
@@ -148,11 +154,12 @@ class ResPredictBatch(object):
 
 
     def preprocess(self):
+        self.imgs = np.moveaxis(self.imgs, [0, 1, 2, 3], [0, 3, 1, 2])
         # Add NDWI band
-        self.add_nd(self.imgs, 1, 3)
+        self.add_nd(1, 3)
 
         # Add NDVI band
-        self.add_nd(self.imgs, 3, 2)
+        self.add_nd(3, 2)
 
         # Apply scaling
         mean = np.mean(self.imgs)
@@ -160,9 +167,23 @@ class ResPredictBatch(object):
         self.imgs -= mean
         self.imgs /= std
 
+        # Resize and reshape
+        new_imgs = np.zeros((self.imgs.shape[0], self.resize_dims[0],
+                            self.resize_dims[1], self.imgs.shape[3]))
+
+        for i in range(self.imgs.shape[0]):
+            new_imgs[i] = transform.resize(self.imgs[i],
+                                            (self.resize_dims[0], self.resize_dims[1],
+                                             self.imgs.shape[3]),
+                                            preserve_range=True)
+        self.imgs = new_imgs
+
 
     def predict(self):
         self.preds = self.model.predict(self.imgs, self.batch_size)
+        self.preds[self.preds >= 0.5] = 1
+        self.preds[self.preds < 0.5] = 0
+        self.preds = self.preds.astype('uint8')
 
 
     def write_images(self):
@@ -171,12 +192,16 @@ class ResPredictBatch(object):
                 self.out_dir, self.start_indices[i, 0], self.start_indices[i, 1])
             new_dataset = rasterio.open(
                 outfile, 'w', driver='GTiff',
-                height=self.dim_y, width=self.dim_x,
+                height=self.dims[1], width=self.dims[0],
                 count=1, dtype='uint8',
                 crs=self.crs,
                 transform=self.get_geotransform(tuple(self.start_indices[i,:]))
             )
-            new_dataset.write(self.preds[i], 1)
+            pred = transform.resize(self.preds[i, :, :, 0],
+                                    (self.dims[0], self.dims[1]),
+                                    preserve_range=True)
+            print(pred.shape)
+            new_dataset.write(pred.astype('uint8'), 1)
 
     def predict_write_batch(self):
         """Master method for loading, predicting, and writing full batch."""
@@ -224,7 +249,7 @@ def predict_map(source_path, model_structure, model_weights, out_dir):
             dims=(DIM_X, DIM_Y), nbands=NBANDS,
             resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
             model=unet_model)
-        ResPredictBatch.predict_write_batch()
+        res_batch.predict_write_batch()
 
 
     # Mosaic
