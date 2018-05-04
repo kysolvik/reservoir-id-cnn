@@ -17,8 +17,8 @@ import argparse
 import numpy as np
 import pandas as pd
 from skimage import io
-import gdal
 import rasterio
+from keras import models
 
 DIM_X = 500
 DIM_Y = 500
@@ -47,8 +47,11 @@ def argparse_init():
     p.add_argument('source_path',
                    help = 'Path to raw input image to predict on.',
                    type = str)
+    p.add_argument('model_structure',
+                   help = 'Text file containing model structure saved as json.',
+                   type = str)
     p.add_argument('model_weights',
-                   help = 'Path to hdf5 file containing model weights.',
+                   help = 'hdf5 file containing saved model weights.',
                    type = str)
     p.add_argument('out_dir',
                    help = 'Output directory for predicted subsets',
@@ -87,7 +90,7 @@ class ResPredictBatch(object):
 
     """
     def __init__(self, img_src, start_indices, batch_size, dims, nbands,
-                 resize_dims, out_dir='./predict/', model):
+                 resize_dims, model, out_dir='./predict/'):
         self.img_src = img_src
         self.start_indices = start_indices
         self.batch_size = batch_size
@@ -96,7 +99,6 @@ class ResPredictBatch(object):
         self.resize_dims = resize_dims
         self.out_dir = out_dir
         self.model = model
-
 
     @property
     def crs(self):
@@ -114,6 +116,8 @@ class ResPredictBatch(object):
         new_upperleft = geo * indice_pair
         geo[2] = new_upperleft[0]
         geo[5] = new_upperleft[1]
+
+        return geo
 
 
     def load_images(self):
@@ -174,7 +178,6 @@ class ResPredictBatch(object):
             )
             new_dataset.write(self.preds[i], 1)
 
-
     def predict_write_batch(self):
         """Master method for loading, predicting, and writing full batch."""
         self.load_images()
@@ -182,73 +185,20 @@ class ResPredictBatch(object):
         self.predict()
         self.write_images()
 
-
-def get_unet(img_rows, img_cols, nbands):
-    """Load U-Net structure."""
-    inputs = Input((img_rows, img_cols, nbands))
-    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
-    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
-    pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
-
-    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(pool1)
-    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv2)
-    pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
-
-    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same')(pool2)
-    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv3)
-    pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
-
-    conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(pool3)
-    conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv4)
-    pool4 = MaxPooling2D(pool_size=(2, 2))(conv4)
-
-    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(pool4)
-    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(conv5)
-
-    up6 = concatenate([Conv2DTranspose(256, (2, 2), strides=(2, 2),
-                                       padding='same')(conv5), conv4], axis=3)
-    conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(up6)
-    conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv6)
-
-    up7 = concatenate([Conv2DTranspose(128, (2, 2), strides=(2, 2),
-                                       padding='same')(conv6), conv3], axis=3)
-    conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(up7)
-    conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv7)
-
-    up8 = concatenate([Conv2DTranspose(64, (2, 2), strides=(2, 2),
-                                       padding='same')(conv7), conv2], axis=3)
-    conv8 = Conv2D(64, (3, 3), activation='relu', padding='same')(up8)
-    conv8 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv8)
-
-    up9 = concatenate([Conv2DTranspose(32, (2, 2), strides=(2, 2),
-                                       padding='same')(conv8), conv1], axis=3)
-    conv9 = Conv2D(32, (3, 3), activation='relu', padding='same')(up9)
-    conv9 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv9)
-
-    conv10 = Conv2D(1, (1, 1), activation='sigmoid')(conv9)
-
-    model = Model(inputs=[inputs], outputs=[conv10])
-
-    model.compile(optimizer='adam')
-
-    return model
-
 def mosaic_tiles(tile_dir, mosaic_path):
 
     return
 
-
-def main():
-    # Get command line args
-    parser = argparse_init()
-    args = parser.parse_args()
+def predict_map(source_path, model_structure, model_weights, out_dir):
 
     # Load model
-    unet_model = get_unet(RESIZE_ROWS, RESIZE_COLS, NBANDS)
-    unet_model.load_weights(args.model_weights)
+    with open(model_structure, 'r') as struct_file:
+        structure_json = struct_file.read()
+    unet_model = models.model_from_json(structure_json)
+    unet_model.load_weights(model_weights)
 
     # Open image
-    src = rasterio.open(args.source_path)
+    src = rasterio.open(source_path)
     total_rows, total_cols = src.height, src.width
 
     current_row = 0
@@ -272,15 +222,24 @@ def main():
         res_batch = ResPredictBatch(
             img_src=src, start_indices=batch_ind, batch_size=BATCH_SIZE,
             dims=(DIM_X, DIM_Y), nbands=NBANDS,
-            resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=args.out_dir,
+            resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
             model=unet_model)
         ResPredictBatch.predict_write_batch()
 
 
     # Mosaic
 
+    return
 
-    return()
+def main():
+    # Get command line args
+    parser = argparse_init()
+    args = parser.parse_args()
+
+    predict_map(args.source_path, args.model_structure, args.model_weights,
+                args.out_dir)
+
+    return
 
 
 if __name__ == '__main__':
