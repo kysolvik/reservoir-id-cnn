@@ -12,7 +12,7 @@ Example:
 
 
 import pathlib
-import os.path
+import os
 import argparse
 import numpy as np
 import pandas as pd
@@ -20,6 +20,9 @@ from skimage import io, transform
 import rasterio
 import affine
 from keras import models
+import tempfile
+import subprocess as sp
+import glob
 
 DIM_X = 500
 DIM_Y = 500
@@ -35,8 +38,8 @@ NBANDS = 4
 OVERLAP = 100
 # Overlap size, in pixels.
 
-BATCH_SIZE = 8
-# NN prediction batch size
+BATCH_SIZE = 100
+# Batch size for process/prediction
 
 
 def argparse_init():
@@ -133,6 +136,8 @@ class ResPredictBatch(object):
             row, col = self.start_indices[i,0], self.start_indices[i,1]
             self.imgs[i] = self.img_src.read(window=((row, row + self.dims[0]),
                                                      (col, col + self.dims[1])))
+        # Eliminate all null imgs
+        self.imgs = self.imgs[np.max(self.imgs, axis=(1,2,3)) > 0]
 
 
     def add_nd(self, band1, band2):
@@ -155,6 +160,7 @@ class ResPredictBatch(object):
 
     def preprocess(self):
         self.imgs = np.moveaxis(self.imgs, [0, 1, 2, 3], [0, 3, 1, 2])
+
         # Add NDWI band
         self.add_nd(1, 3)
 
@@ -180,42 +186,42 @@ class ResPredictBatch(object):
 
 
     def predict(self):
-        self.preds = self.model.predict(self.imgs, self.batch_size)
-        self.preds[self.preds >= 0.5] = 1
+        self.preds = self.model.predict(self.imgs, 8)
+        self.preds[self.preds >= 0.5] = 255
         self.preds[self.preds < 0.5] = 0
         self.preds = self.preds.astype('uint8')
 
 
     def write_images(self):
-        for i in range(self.batch_size):
+        for i in range(self.preds.shape[0]):
             outfile = '{}/pred_{}-{}.tif'.format(
                 self.out_dir, self.start_indices[i, 0], self.start_indices[i, 1])
             new_dataset = rasterio.open(
                 outfile, 'w', driver='GTiff',
                 height=self.dims[1], width=self.dims[0],
                 count=1, dtype='uint8',
-                crs=self.crs,
+                crs=self.crs, nodata=0,
                 transform=self.get_geotransform(tuple(self.start_indices[i,:]))
             )
             pred = transform.resize(self.preds[i, :, :, 0],
                                     (self.dims[0], self.dims[1]),
                                     preserve_range=True)
-            print(pred.shape)
             new_dataset.write(pred.astype('uint8'), 1)
+            if np.max(pred) > 0:
+                print(outfile)
+
 
     def predict_write_batch(self):
         """Master method for loading, predicting, and writing full batch."""
         self.load_images()
-        self.preprocess()
-        self.predict()
-        self.write_images()
+        if self.imgs.shape[0] > 0:
+            print(self.imgs.shape[0])
+            self.preprocess()
+            self.predict()
+            self.write_images()
 
-def mosaic_tiles(tile_dir, mosaic_path):
 
-    return
-
-def predict_map(source_path, model_structure, model_weights, out_dir):
-
+def prep_batches(source_path, model_structure, model_weights):
     # Load model
     with open(model_structure, 'r') as struct_file:
         structure_json = struct_file.read()
@@ -242,19 +248,52 @@ def predict_map(source_path, model_structure, model_weights, out_dir):
     total_batches = np.ceil(start_ind.shape[0]/BATCH_SIZE)
     start_ind_batches = np.array_split(start_ind, total_batches)
 
+    return start_ind_batches, unet_model, src
+
+
+def predict_batches(start_ind_batches, unet_model, img_src, out_dir):
     # Run prediction
+    batch_count = 0
     for batch_ind in start_ind_batches:
         res_batch = ResPredictBatch(
-            img_src=src, start_indices=batch_ind, batch_size=BATCH_SIZE,
+            img_src=img_src, start_indices=batch_ind,
+            batch_size=batch_ind.shape[0],
             dims=(DIM_X, DIM_Y), nbands=NBANDS,
             resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
             model=unet_model)
         res_batch.predict_write_batch()
 
+    return
 
-    # Mosaic
+
+def predict_fullmap(source_path, model_structure, model_weights, out_dir):
+
+    start_ind_batches, unet_model, img_src = prep_batches(
+        source_path, model_structure, model_weights)
+
+    predict_batches(start_ind_batches, unet_model, img_src, out_dir)
 
     return
+
+
+def mosaic_predictions(tile_list, mosaiced_tif):
+    """Mosaic output tiles into full raster."""
+
+    tmpdir = tempfile.mkdtemp()
+    tmpvrt = '{}/temp.vrt'.format(tmpdir)
+
+    # Make vrt mosaic
+    sp.call(['gdalbuildvrt', tmpvrt] + tile_list)
+
+    # Translate it to a tif
+    sp.call(['gdal_translate', '-co', 'COMPRESS=LZW', tmpvrt, mosaiced_tif])
+
+    # Cleanup
+    os.remove(tmpvrt)
+    os.rmdir(tmpdir)
+
+    return
+
 
 def main():
     # Get command line args
@@ -263,6 +302,10 @@ def main():
 
     predict_map(args.source_path, args.model_structure, args.model_weights,
                 args.out_dir)
+
+    if args.mosaic is not None:
+        tile_list = glob.glob('{}/*.tif'.format(args.out_dir))
+        mosaic_predictions(tile_list, args.mosaic)
 
     return
 
