@@ -94,7 +94,7 @@ class ResPredictBatch(object):
 
     """
     def __init__(self, img_src, start_indices, batch_size, dims, nbands,
-                 resize_dims, model, out_dir='./predict/'):
+                 resize_dims, model, mean_std_file, out_dir='./predict/'):
         self.img_src = img_src
         self.start_indices = start_indices
         self.batch_size = batch_size
@@ -102,6 +102,7 @@ class ResPredictBatch(object):
         self.nbands = nbands
         self.resize_dims = resize_dims
         self.out_dir = out_dir
+        self.mean_std_file = mean_std_file
         self.model = model
 
     @property
@@ -168,8 +169,9 @@ class ResPredictBatch(object):
         self.add_nd(3, 2)
 
         # Apply scaling
-        mean = np.mean(self.imgs)
-        std = np.std(self.imgs)
+        mean_std_array = np.load(self.mean_std_file)
+        mean = mean_std_array[0,:]
+        std = mean_std_array[1,:]
         self.imgs -= mean
         self.imgs /= std
 
@@ -260,7 +262,7 @@ def predict_batches(start_ind_batches, unet_model, img_src, out_dir):
             batch_size=batch_ind.shape[0],
             dims=(DIM_X, DIM_Y), nbands=NBANDS,
             resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
-            model=unet_model)
+            model=unet_model, mean_std_file='../train/mean_std.npy')
         res_batch.predict_write_batch()
 
     return

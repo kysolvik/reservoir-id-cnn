@@ -170,7 +170,7 @@ def get_unet(img_rows, img_cols, nbands):
 
     model = Model(inputs=[inputs], outputs=[conv10])
 
-    model.compile(optimizer=Adam(lr=1e-5),
+    model.compile(optimizer=Adam(lr=5e-5),
                   loss=dice_coef_loss,
                   metrics=[jaccard_coef, dice_coef,
                            'accuracy'])
@@ -200,19 +200,20 @@ def train_and_predict():
     imgs_mask_train = resize_imgs(imgs_mask_train, 1)
 
     imgs_train = imgs_train.astype('float32')
-    mean = np.mean(imgs_train)  # mean for data centering
-    std = np.std(imgs_train)  # std for data normalization
+    mean = np.mean(imgs_train, axis=(0,1,2))  # mean for data centering
+    std = np.std(imgs_train, axis=(0,1,2))  # std for data normalization
 
-#     for i in range(imgs_train.shape[0]):
-#         imgs_train[i] = stretch_n(imgs_train[i])
+    # Save the mean and std values
+    np.save('mean_std.npy', np.vstack((mean, std)))
+
     imgs_train -= mean
     imgs_train /= std
 
     imgs_mask_train = imgs_mask_train.astype('float32')
 
     imgs_mask_train /= 255.  # scale masks to [0, 1]
-    imgs_mask_train[imgs_mask_train >= 0.1] = 1
-    imgs_mask_train[imgs_mask_train < 0.1] = 0
+    imgs_mask_train[imgs_mask_train >= 0.5] = 1
+    imgs_mask_train[imgs_mask_train < 0.5] = 0
 
     print('-'*30)
     print('Creating and compiling model...')
@@ -247,13 +248,16 @@ def train_and_predict():
     imgs_test = imgs_test.astype('float32')
     imgs_test -= mean
     imgs_test /= std
-#     for i in range(imgs_test.shape[0]):
-#         imgs_test[i] = stretch_n(imgs_test[i])
 
     print('-'*30)
     print('Loading saved weights...')
     print('-'*30)
     model.load_weights('weights.h5')
+
+    print('-'*30)
+    print('Saving complete model...')
+    print('-'*30)
+    model.save('full_model.h5')
 
     print('-'*30)
     print('Predicting masks on test data...')
