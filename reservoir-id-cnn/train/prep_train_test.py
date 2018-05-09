@@ -21,6 +21,8 @@ import random
 import argparse
 import augment_data as augment
 
+# Set random seed for
+random.seed(5783)
 
 def argparse_init():
     """Prepare ArgumentParser for inputs."""
@@ -129,13 +131,13 @@ def pad_mask(img_mask):
 
 
 def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
-                           test_frac=0.2):
+                           test_frac=0.2, val_frac=0.15):
     """Save training and test data into easy .npy file"""
     images = os.listdir(data_path)
-    total = int(len(images) / 2) # ksolvik: Needed to convert to int
+    total_ims = int(len(images) / 2)
 
-    imgs = np.ndarray((total, dim_x, dim_y, nbands), dtype=np.uint16)
-    imgs_mask = np.ndarray((total, dim_x, dim_y), dtype=np.uint8)
+    imgs = np.ndarray((total_ims, dim_x, dim_y, nbands), dtype=np.uint16)
+    imgs_mask = np.ndarray((total_ims, dim_x, dim_y), dtype=np.uint8)
 
     i = 0
     print('-'*30)
@@ -157,7 +159,7 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
         imgs_mask[i] = img_mask
 
         if i % 100 == 0:
-            print('Done: {}/{} images'.format(i, total))
+            print('Done: {}/{} images'.format(i, total_ims))
         i += 1
 
         og_img_names += [image_name]
@@ -170,11 +172,15 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     # Add NDVI band
     imgs = add_nd(imgs, 3, 2)
 
-    # Split into training, test.
-    total_ims = imgs.shape[0]
-    train_count = round(total_ims * (1 - test_frac))
+    # Split into training, validation, and test sets.
+    train_count = round(total_ims * (1 - test_frac - val_frac))
     train_indices = random.sample(range(total_ims), train_count)
-    test_indices = np.delete(np.array(range(total_ims)), train_indices)
+    test_val_indices = np.delete(np.array(range(total_ims)), train_indices)
+
+    test_count = round(total_ims * test_frac)
+    test_indices = random.sample(list(test_val_indices), test_count)
+    val_indices = np.delete(np.array(range(total_ims)),
+                            np.append(train_indices, test_indices))
 
     imgs_train = imgs[train_indices]
     imgs_mask_train = imgs_mask[train_indices]
@@ -182,11 +188,9 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     imgs_test = imgs[test_indices]
     imgs_mask_test = imgs_mask[test_indices]
     test_img_names = [og_img_names[i] for i in test_indices]
-
-#     # Pad training masks
-#     for i in range(imgs_mask_train.shape[0]):
-#         imgs_mask_train[i] = pad_mask(imgs_mask_train[i])
-#     imgs_mask_train *= 255
+    imgs_val = imgs[val_indices]
+    imgs_mask_val = imgs_mask[val_indices]
+    val_img_names = [og_img_names[i] for i in val_indices]
 
     # Augment training data
     new_imgs = np.zeros_like(imgs_train)
@@ -198,6 +202,7 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     imgs_train = np.vstack((imgs_train, new_imgs))
     imgs_mask_train = np.vstack((imgs_mask_train, new_masks))
 
+    # Write images
     prepped_path = '{}/prepped/'.format(data_path)
     if not os.path.isdir(prepped_path):
            os.makedirs(prepped_path)
@@ -205,6 +210,8 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     np.save('{}imgs_mask_train.npy'.format(prepped_path), imgs_mask_train)
     np.save('{}imgs_test.npy'.format(prepped_path), imgs_test)
     np.save('{}imgs_mask_test.npy'.format(prepped_path), imgs_mask_test)
+    np.save('{}imgs_val.npy'.format(prepped_path), imgs_val)
+    np.save('{}imgs_mask_val.npy'.format(prepped_path), imgs_mask_val)
 
     # Write image names
     with open('{}train_names.csv'.format(prepped_path), 'w') as wf:
@@ -212,6 +219,9 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
             wf.write('{}\n'.format(img_name))
     with open('{}test_names.csv'.format(prepped_path), 'w') as wf:
         for img_name in test_img_names:
+            wf.write('{}\n'.format(img_name))
+    with open('{}val_names.csv'.format(prepped_path), 'w') as wf:
+        for img_name in val_img_names:
             wf.write('{}\n'.format(img_name))
 
     print('Saving to .npy files done.')
@@ -229,7 +239,7 @@ def main():
     if not args.no_download:
         og_mask_tuples, gs_bucket_name = find_ims_masks(args.labelbox_json)
 
-        # Initiate bucket, first stripping bucket name from URL.
+        # Download imgs using Google Cloud Storage client
         storage_client = storage.Client()
         gs_bucket = storage_client.get_bucket(gs_bucket_name)
         for og_mask_pair in og_mask_tuples:

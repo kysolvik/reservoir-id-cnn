@@ -7,7 +7,7 @@ import random as random
 from skimage import transform
 
 
-def random_aug(img, mask, resize_range=(0.8, 1.0)):
+def random_aug(img, mask, resize_range=(0.7, 1.0)):
     """Perform a random assortment of augmentationso to an img-mask pair."""
     # Save datatypes to convert back to later
     img_dtype = img.dtype
