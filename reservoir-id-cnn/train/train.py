@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-"""
+"""Train U-Net on reservoir images
+
+Example:
+    python3 train.py
+
+Notes:
+    Must be run from reservoir-id-cnn/train/
+    Prepped data should be in the: ./data/prepped/ directory
 
 """
+
 
 import os
 from skimage import transform
@@ -13,28 +21,29 @@ from keras.callbacks import ModelCheckpoint, TensorBoard, EarlyStopping
 from keras import backend as K
 from skimage import io
 
+
 K.set_image_data_format('channels_last')  # TF dimension ordering in this code
 
 OG_ROWS = 500
 OG_COLS = 500
 # Original image dimensions
-
 RESIZE_ROWS = 512
 RESIZE_COLS = 512
 # Resized dimensions for training/testing.
-
 NUM_BANDS = 6
 # Number of bands in image.
-
 SMOOTH = 1.
 # Smoothing factor for jaccard_coef
-
 PRED_THRESHOLD = 0.5
 # Prediction threshold. > PRED_THRESHOLD will be classified as res.
 
 
 def jaccard_coef(y_true, y_pred, smooth=SMOOTH):
-    # __author__ = Vladimir Iglovikov
+    """Keras jaccard coefficient
+
+    @author: Vladimir Iglovikov
+    """
+
     intersection = K.sum(y_true * y_pred, axis=[0, -1, -2])
     sum_ = K.sum(y_true + y_pred, axis=[0, -1, -2])
 
@@ -43,18 +52,9 @@ def jaccard_coef(y_true, y_pred, smooth=SMOOTH):
     return K.mean(jac)
 
 
-def jaccard_coef_int(y_true, y_pred, smooth=SMOOTH):
-    # __author__ = Vladimir Iglovikov
-    y_pred_pos = K.round(K.clip(y_pred, 0, 1))
-
-    intersection = K.sum(y_true * y_pred_pos, axis=[0, -1, -2])
-    sum_ = K.sum(y_true + y_pred, axis=[0, -1, -2])
-    jac = (intersection + smooth) / (sum_ - intersection + smooth)
-    return K.mean(jac)
-
-
 def jaccard_distance_loss(y_true, y_pred, smooth=100):
-    """
+    """Keras jaccard loss function
+
     Jaccard = (|X & Y|)/ (|X|+ |Y| - |X & Y|)
             = sum(|A*B|)/(sum(|A|)+sum(|B|)-sum(|A*B|))
 
@@ -67,6 +67,7 @@ def jaccard_distance_loss(y_true, y_pred, smooth=100):
     @url: https://gist.github.com/wassname/f1452b748efcbeb4cb9b1d059dce6f96
     @author: wassname
     """
+
     intersection = K.sum(K.abs(y_true * y_pred), axis=-1)
     sum_ = K.sum(K.abs(y_true) + K.abs(y_pred), axis=-1)
     jac = (intersection + smooth) / (sum_ - intersection + smooth)
@@ -103,6 +104,7 @@ def stretch_n(bands, lower_percent=0, higher_percent=100):
 
 
 def dice_coef(y_true, y_pred, smooth=SMOOTH):
+    """Keras implementation of Dice coefficient"""
     y_true_f = K.flatten(y_true)
     y_pred_f = K.flatten(y_pred)
     intersection = K.sum(y_true_f * y_pred_f)
@@ -111,6 +113,7 @@ def dice_coef(y_true, y_pred, smooth=SMOOTH):
 
 
 def dice_coef_wgt(y_true, y_pred, smooth=SMOOTH):
+    """Modified Dice, with Positive class given double weight"""
     y_true_f = K.flatten(y_true)
     y_pred_f = K.flatten(y_pred)
     weights = K.cast(K.greater(y_true_f, 0.5), dtype='float32')
@@ -121,10 +124,16 @@ def dice_coef_wgt(y_true, y_pred, smooth=SMOOTH):
 
 
 def dice_coef_loss(y_true, y_pred):
+    """Loss function is simply dice coefficient * -1"""
     return -dice_coef(y_true, y_pred)
 
 
 def get_unet(img_rows, img_cols, nbands):
+    """U-Net Structure
+
+    @author: jocicmarko
+    @url: https://github.com/jocicmarko/ultrasound-nerve-segmentation
+    """
 
     inputs = Input((img_rows, img_cols, nbands))
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
@@ -179,6 +188,7 @@ def get_unet(img_rows, img_cols, nbands):
 
 
 def resize_imgs(imgs, nbands):
+    """Resize numpy array of images"""
     imgs_p = np.ndarray((imgs.shape[0], RESIZE_ROWS, RESIZE_COLS, nbands))
 
     for i in range(imgs.shape[0]):
@@ -189,17 +199,28 @@ def resize_imgs(imgs, nbands):
     return imgs_p
 
 
-def train_and_predict():
+def train():
+    """Master function for training"""
     print('-'*30)
     print('Loading and preprocessing train data...')
     print('-'*30)
+
+    # Preprocess. Should write a func for this
     imgs_train = np.load('./data/prepped/imgs_train.npy')
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
+    imgs_val = np.load('./data/prepped/imgs_val.npy')
+    imgs_mask_val = np.load('./data/prepped/imgs_mask_val.npy')
 
     imgs_train = resize_imgs(imgs_train, NUM_BANDS)
     imgs_mask_train = resize_imgs(imgs_mask_train, 1)
+    imgs_val = resize_imgs(imgs_val, NUM_BANDS)
+    imgs_mask_val = resize_imgs(imgs_mask_val, 1)
 
     imgs_train = imgs_train.astype('float32')
+    imgs_mask_train = imgs_mask_train.astype('float32')
+    imgs_val = imgs_val.astype('float32')
+    imgs_mask_val = imgs_mask_val.astype('float32')
+
     mean = np.mean(imgs_train, axis=(0,1,2))  # mean for data centering
     std = np.std(imgs_train, axis=(0,1,2))  # std for data normalization
 
@@ -208,12 +229,16 @@ def train_and_predict():
 
     imgs_train -= mean
     imgs_train /= std
+    imgs_val -= mean
+    imgs_val /= std
 
-    imgs_mask_train = imgs_mask_train.astype('float32')
 
     imgs_mask_train /= 255.  # scale masks to [0, 1]
     imgs_mask_train[imgs_mask_train >= 0.5] = 1
     imgs_mask_train[imgs_mask_train < 0.5] = 0
+    imgs_mask_val /= 255.  # scale masks to [0, 1]
+    imgs_mask_val[imgs_mask_val >= 0.5] = 1
+    imgs_mask_val[imgs_mask_val < 0.5] = 0
 
     print('-'*30)
     print('Creating and compiling model...')
@@ -234,7 +259,8 @@ def train_and_predict():
     print('-'*30)
 
     model.fit(imgs_train, imgs_mask_train, batch_size=8, epochs=500,
-              verbose=1, shuffle=True, validation_split=0.2,
+              verbose=1, shuffle=True,
+              validation_data=(imgs_val, imgs_mask_val),
               callbacks=[model_checkpoint, tensorboard, early_stopping])
 
     print('-'*30)
@@ -325,4 +351,4 @@ def train_and_predict():
     return
 
 if __name__=='__main__':
-    train_and_predict()
+    train()
