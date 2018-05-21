@@ -24,8 +24,8 @@ import tempfile
 import subprocess as sp
 import glob
 
-DIM_X = 500
-DIM_Y = 500
+OG_ROWS = 500
+OG_COLS = 500
 # Dimensions of input images.
 
 RESIZE_ROWS = 512
@@ -40,6 +40,16 @@ OVERLAP = 100
 
 BATCH_SIZE = 100
 # Batch size for process/prediction
+
+def scale_image_tobyte(ar):
+    """Scale larger data type array to byte"""
+    min_val = np.min(ar)
+    max_val = np.max(ar)
+    byte_ar = (np.round(255.0 * (ar - min_val) / (max_val - min_val))
+               .astype(np.uint8))
+    byte_ar[ar == 0] = 0
+
+    return(byte_ar)
 
 
 def argparse_init():
@@ -121,13 +131,15 @@ class ResPredictBatch(object):
             indice_pair (tuple): Row, Col indices of upper left corner of tile.
 
         """
-        geo = self.img_src.affine
-        new_upperleft = geo * indice_pair
+        geo = self.img_src.transform
+        new_ul = [geo[0] + indice_pair[0]*geo[1] + indice_pair[1]*geo[2],
+                  geo[3] + indice_pair[0]*geo[4] + indice_pair[1]*geo[5]]
 
-        new_geo = affine.Affine(geo[0], geo[1], new_upperleft[0],
-                                geo[3], geo[4], new_upperleft[1])
+        new_geo = [new_ul[0], geo[1], geo[2], new_ul[1], geo[4], geo[5]]
+        new_affine= affine.Affine.from_gdal(new_ul[0], geo[1], geo[2],
+                                            new_ul[1], geo[4], geo[5])
 
-        return new_geo
+        return new_affine
 
 
     def load_images(self):
@@ -138,7 +150,9 @@ class ResPredictBatch(object):
             self.imgs[i] = self.img_src.read(window=((row, row + self.dims[0]),
                                                      (col, col + self.dims[1])))
         # Eliminate all null imgs
-        self.imgs = self.imgs[np.max(self.imgs, axis=(1,2,3)) > 0]
+        valid_imgs =np.min(self.imgs, axis=(1,2,3)) > 0
+        self.imgs = self.imgs[valid_imgs]
+        self.start_indices = self.start_indices[valid_imgs]
 
 
     def add_nd(self, band1, band2):
@@ -189,9 +203,6 @@ class ResPredictBatch(object):
 
     def predict(self):
         self.preds = self.model.predict(self.imgs, 8)
-        self.preds[self.preds >= 0.5] = 255
-        self.preds[self.preds < 0.5] = 0
-        self.preds = self.preds.astype('uint8')
 
 
     def write_images(self):
@@ -203,21 +214,35 @@ class ResPredictBatch(object):
                 height=self.dims[1], width=self.dims[0],
                 count=1, dtype='uint8',
                 crs=self.crs, nodata=0,
-                transform=self.get_geotransform(tuple(self.start_indices[i,:]))
+                transform=self.get_geotransform((self.start_indices[i,1],
+                                                 self.start_indices[i,0]))
             )
             pred = transform.resize(self.preds[i, :, :, 0],
                                     (self.dims[0], self.dims[1]),
                                     preserve_range=True)
+            pred[pred >= 0.5] = 255
+            pred[pred < 0.5] = 0
             new_dataset.write(pred.astype('uint8'), 1)
-            if np.max(pred) > 0:
-                print(outfile)
+
+            # Save NDWI, predicted mask, and actual masks side by side
+            compare_filename = '{}/pred_{}-{}_results.png'.format(
+                self.out_dir, self.start_indices[i, 0], self.start_indices[i, 1])
+            compare_im = 255 * np.ones((500, 500 * 2 + 10), dtype=np.uint8)
+            ndwi_img = self.imgs[i,:,:,4]
+            ndwi_img = transform.resize(ndwi_img,
+                                    (OG_ROWS, OG_COLS),
+                                    preserve_range = True)
+            ndwi_img = scale_image_tobyte(ndwi_img)
+            ndwi_img = ndwi_img.astype('uint8')
+            compare_im[0:500, 0:500] = ndwi_img
+            compare_im[0:500, (500 + 10):] = pred
+            io.imsave(compare_filename, compare_im)
 
 
     def predict_write_batch(self):
         """Master method for loading, predicting, and writing full batch."""
         self.load_images()
         if self.imgs.shape[0] > 0:
-            print(self.imgs.shape[0])
             self.preprocess()
             self.predict()
             self.write_images()
@@ -236,12 +261,12 @@ def prep_batches(source_path, model_structure, model_weights):
 
     current_row = 0
     current_col = 0
-    row_starts = np.arange(0, total_rows - DIM_X, DIM_X - OVERLAP)
-    col_starts = np.arange(0, total_cols - DIM_Y, DIM_Y - OVERLAP)
+    row_starts = np.arange(0, total_rows - OG_ROWS, OG_ROWS - OVERLAP)
+    col_starts = np.arange(0, total_cols - OG_COLS, OG_COLS - OVERLAP)
 
     # Add final indices to row_starts and col_starts
-    row_starts = np.append(row_starts, total_rows - DIM_X)
-    col_starts = np.append(col_starts, total_cols - DIM_Y)
+    row_starts = np.append(row_starts, total_rows - OG_ROWS)
+    col_starts = np.append(col_starts, total_cols - OG_COLS)
 
     # Create Nx2 array with row/col start indices
     start_ind = np.array(np.meshgrid(row_starts, col_starts)).T.reshape(-1, 2)
@@ -260,7 +285,7 @@ def predict_batches(start_ind_batches, unet_model, img_src, out_dir):
         res_batch = ResPredictBatch(
             img_src=img_src, start_indices=batch_ind,
             batch_size=batch_ind.shape[0],
-            dims=(DIM_X, DIM_Y), nbands=NBANDS,
+            dims=(OG_ROWS, OG_COLS), nbands=NBANDS,
             resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
             model=unet_model, mean_std_file='../train/mean_std.npy')
         res_batch.predict_write_batch()
@@ -302,8 +327,8 @@ def main():
     parser = argparse_init()
     args = parser.parse_args()
 
-    predict_map(args.source_path, args.model_structure, args.model_weights,
-                args.out_dir)
+    predict_fullmap(args.source_path, args.model_structure, args.model_weights,
+                    args.out_dir)
 
     if args.mosaic is not None:
         tile_list = glob.glob('{}/*.tif'.format(args.out_dir))
