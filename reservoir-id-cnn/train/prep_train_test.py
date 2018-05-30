@@ -199,8 +199,14 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
         new_imgs[i], new_masks[i] = augment.random_aug(
             imgs_train[i],
             imgs_mask_train[i])
-    imgs_train = np.vstack((imgs_train, new_imgs))
-    imgs_mask_train = np.vstack((imgs_mask_train, new_masks))
+    new_imgs2 = np.zeros_like(imgs_train)
+    new_masks2 = np.zeros_like(imgs_mask_train)
+    for i in range(imgs_train.shape[0]):
+        new_imgs2[i], new_masks2[i] = augment.random_aug(
+            imgs_train[i],
+            imgs_mask_train[i])
+    imgs_train = np.vstack((imgs_train, new_imgs, new_imgs2))
+    imgs_mask_train = np.vstack((imgs_mask_train, new_masks, new_masks2))
 
     # Write images
     prepped_path = '{}/prepped/'.format(data_path)

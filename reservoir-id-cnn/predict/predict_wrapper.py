@@ -34,6 +34,7 @@ def predict_wrapper():
         predict_map.predict_fullmap(local_rast, '../train/unet_structure.txt',
                                     '../train/weights.h5',
                                     './out/{}'.format(tile_out_dir))
+        os.remove(local_rast)
 
     return
 

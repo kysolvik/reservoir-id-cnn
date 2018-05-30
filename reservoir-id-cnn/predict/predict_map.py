@@ -6,7 +6,7 @@ This script subsets a large image and predicts on the subsets
 then optional merges them back into a full image.
 
 Example:
-    $ python3 predict_map.py ./sentinel.tif ./tiledir --mosaic='./fullrast.tif'
+    $ python3 predict_map.py sentinel.tif weights.h5 structure.txt ./tiledir/ --mosaic='fullrast.tif'
 
 """
 
@@ -35,21 +35,11 @@ RESIZE_COLS = 512
 NBANDS = 4
 # Number of bands in original image
 
-OVERLAP = 100
+OVERLAP = 250
 # Overlap size, in pixels.
 
-BATCH_SIZE = 100
+BATCH_SIZE = 200
 # Batch size for process/prediction
-
-def scale_image_tobyte(ar):
-    """Scale larger data type array to byte"""
-    min_val = np.min(ar)
-    max_val = np.max(ar)
-    byte_ar = (np.round(255.0 * (ar - min_val) / (max_val - min_val))
-               .astype(np.uint8))
-    byte_ar[ar == 0] = 0
-
-    return(byte_ar)
 
 
 def argparse_init():
@@ -76,6 +66,17 @@ def argparse_init():
                    type = str)
 
     return p
+
+
+def scale_image_tobyte(ar):
+    """Scale larger data type array to byte"""
+    min_val = np.min(ar)
+    max_val = np.max(ar)
+    byte_ar = (np.round(255.0 * (ar - min_val) / (max_val - min_val))
+               .astype(np.uint8))
+    byte_ar[ar == 0] = 0
+
+    return(byte_ar)
 
 
 def normalized_diff(ar1, ar2):
@@ -212,7 +213,7 @@ class ResPredictBatch(object):
             new_dataset = rasterio.open(
                 outfile, 'w', driver='GTiff',
                 height=self.dims[1], width=self.dims[0],
-                count=1, dtype='uint8',
+                count=1, dtype='uint8', compress='lzw',
                 crs=self.crs, nodata=0,
                 transform=self.get_geotransform((self.start_indices[i,1],
                                                  self.start_indices[i,0]))
@@ -294,6 +295,10 @@ def predict_batches(start_ind_batches, unet_model, img_src, out_dir):
 
 
 def predict_fullmap(source_path, model_structure, model_weights, out_dir):
+
+    # Create output dir
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
 
     start_ind_batches, unet_model, img_src = prep_batches(
         source_path, model_structure, model_weights)

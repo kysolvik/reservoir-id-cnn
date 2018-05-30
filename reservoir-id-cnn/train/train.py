@@ -33,7 +33,7 @@ RESIZE_COLS = 512
 NUM_BANDS = 6
 # Number of bands in image.
 SMOOTH = 1.
-# Smoothing factor for jaccard_coef
+# Smoothing factor for dice and jaccard coefficients
 PRED_THRESHOLD = 0.5
 # Prediction threshold. > PRED_THRESHOLD will be classified as res.
 
@@ -52,7 +52,7 @@ def jaccard_coef(y_true, y_pred, smooth=SMOOTH):
     return K.mean(jac)
 
 
-def jaccard_distance_loss(y_true, y_pred, smooth=100):
+def jaccard_distance_loss(y_true, y_pred, smooth=SMOOTH):
     """Keras jaccard loss function
 
     Jaccard = (|X & Y|)/ (|X|+ |Y| - |X & Y|)
@@ -74,33 +74,15 @@ def jaccard_distance_loss(y_true, y_pred, smooth=100):
     return (1 - jac) * smooth
 
 
-
 def scale_image_tobyte(ar):
     """Scale larger data type array to byte"""
-
     min_val = np.min(ar)
     max_val = np.max(ar)
-    byte_ar = np.round(255.0 * (ar - min_val) / (max_val - min_val)) \
-        .astype(np.uint8)
+    byte_ar = (np.round(255.0 * (ar - min_val) / (max_val - min_val))
+               .astype(np.uint8))
     byte_ar[ar == 0] = 0
 
     return(byte_ar)
-
-
-def stretch_n(bands, lower_percent=0, higher_percent=100):
-    out = np.zeros_like(bands)
-    n = bands.shape[2]
-    for i in range(n):
-        a = 0  # np.min(band)
-        b = 1  # np.max(band)
-        c = np.percentile(bands[:, :, i], lower_percent)
-        d = np.percentile(bands[:, :, i], higher_percent)
-        t = a + (bands[:, :, i] - c) * (b - a) / (d - c)
-        t[t < a] = a
-        t[t > b] = b
-        out[:, :, i] = t
-
-    return out.astype(np.float32)
 
 
 def dice_coef(y_true, y_pred, smooth=SMOOTH):
@@ -232,7 +214,6 @@ def train():
     imgs_val -= mean
     imgs_val /= std
 
-
     imgs_mask_train /= 255.  # scale masks to [0, 1]
     imgs_mask_train[imgs_mask_train >= 0.5] = 1
     imgs_mask_train[imgs_mask_train < 0.5] = 0
@@ -279,11 +260,6 @@ def train():
     print('Loading saved weights...')
     print('-'*30)
     model.load_weights('weights.h5')
-
-    print('-'*30)
-    print('Saving complete model...')
-    print('-'*30)
-    model.save('full_model.h5')
 
     print('-'*30)
     print('Predicting masks on test data...')
