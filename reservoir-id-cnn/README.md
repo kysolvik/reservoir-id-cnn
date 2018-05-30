@@ -1,6 +1,5 @@
 # reservoir-id-cnn code
-
-data_prep: Scripts relating to preparing and annoting training and test data.
+annotation_prep: Scripts relating to preparing and annoting training and test data.
 
 train: Scripts for training CNN model.
 
