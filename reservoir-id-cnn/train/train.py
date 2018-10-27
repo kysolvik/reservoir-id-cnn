@@ -30,7 +30,7 @@ OG_COLS = 500
 RESIZE_ROWS = 512
 RESIZE_COLS = 512
 # Resized dimensions for training/testing.
-NUM_BANDS = 6
+NUM_BANDS = 14
 # Number of bands in image.
 SMOOTH = 1.
 # Smoothing factor for dice and jaccard coefficients
