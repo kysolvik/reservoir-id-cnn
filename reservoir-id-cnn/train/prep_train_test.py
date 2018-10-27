@@ -20,6 +20,7 @@ from skimage import morphology
 import random
 import argparse
 import augment_data as augment
+import glob
 
 # Set random seed for
 random.seed(5783)
@@ -49,10 +50,16 @@ def find_ims_masks(labelbox_json):
     # URLs for original images
     og_urls = label_df['Labeled Data'].replace('ndwi.png', 'og.tif', regex=True)
 
+    # URLS for
+    s1_urls = label_df['Labeled Data'].replace(
+        'ndwi.png', 's1_og.tif', regex=True)
+    s2_20m_urls = label_df['Labeled Data'].replace(
+        'ndwi.png', 's2_20m_og.tif', regex=True)
+
     # URLs a for image masks
     mask_urls = [m.get('Impoundment') for m in label_df['Masks']]
 
-    og_mask_tuples = zip(og_urls, mask_urls)
+    og_mask_tuples = zip(og_urls, s1_urls, s2_20m_urls, mask_urls)
 
     # Find the bucket name
     sample_og_url = og_urls[0]
@@ -101,18 +108,23 @@ def add_nd(imgs, band1, band2):
     return imgs_wnd
 
 
-def download_im_mask_pair(og_url, mask_url, gs_bucket,
+def download_ims_mask_pair(og_urls, mask_url, gs_bucket,
                           destination_dir='./data/', dim_x=500, dim_y=500):
     """Downloads original image and mask, renaming mask to match image."""
 
-    og_dest_file = '{}/{}'.format(destination_dir, os.path.basename(og_url))
-    mask_dest_file = og_dest_file.replace('og.tif', 'mask.png')
+    name_mask = True
+    for im_url in og_urls:
+        # Download og file from google cloud storage using gsutil
+        og_dest_file = '{}/{}'.format(destination_dir, os.path.basename(im_url))
+        og_gs_path = im_url.replace('https://storage.googleapis.com/{}/'
+                                 .format(gs_bucket.name), '')
+        blob = gs_bucket.blob(og_gs_path)
+        blob.download_to_filename(og_dest_file)
 
-    # Download og file from google cloud storage using gsutil
-    og_gs_path = og_url.replace('https://storage.googleapis.com/{}/'
-                                .format(gs_bucket.name), '')
-    blob = gs_bucket.blob(og_gs_path)
-    blob.download_to_filename(og_dest_file)
+        # Using first og url (sentinel 2 10m bands) name local mask file
+        if name_mask:
+            mask_dest_file = og_dest_file.replace('og.tif', 'mask.png')
+            name_mask = False
 
     if mask_url is None:
         save_empty_mask(mask_dest_file, dim_x, dim_y)
@@ -130,11 +142,15 @@ def pad_mask(img_mask):
     return img_mask_padded
 
 
-def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
+def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
                            test_frac=0.2, val_frac=0.15):
     """Save training and test data into easy .npy file"""
-    images = os.listdir(data_path)
-    total_ims = int(len(images) / 2)
+
+    # Get mask image names and base image patterns
+    mask_images = glob.glob('{}*mask.png'.format(data_path))
+    image_patterns = mask_images.replace('_mask.png', '')
+
+    total_ims = len(mask_images)
 
     imgs = np.ndarray((total_ims, dim_x, dim_y, nbands), dtype=np.uint16)
     imgs_mask = np.ndarray((total_ims, dim_x, dim_y), dtype=np.uint8)
@@ -144,19 +160,22 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=4, data_path='./data/',
     print('Loading images')
     print('-'*30)
     og_img_names = []
-    for image_name in images:
-        if 'mask' in image_name:
-            continue
-        image_mask_name = image_name.replace('og.tif', 'mask.png')
-        img = io.imread(os.path.join(data_path, image_name), as_grey=False)
+    for image_base in image_patterns:
+
+        # Prep mask
+        image_mask_name = '{}_mask.png'.format(os.path.basename(image_base))
         img_mask = io.imread(os.path.join(data_path, image_mask_name),
-                             as_grey=True)
-
-        img = np.array([img])
+                                as_grey=True)
         img_mask = np.array([img_mask])
-
-        imgs[i] = img
         imgs_mask[i] = img_mask
+
+        og_img_list = []
+        for og_img in sorted(glob.glob('{}*og.tif'.format(image_base))):
+            img = io.imread(os.path.join(data_path, image_name), as_grey=False)
+            img = np.array([img])
+            og_img_list += [img]
+
+        imgs[i] = np.dstack(tuple(og_img_list))
 
         if i % 100 == 0:
             print('Done: {}/{} images'.format(i, total_ims))
@@ -249,7 +268,8 @@ def main():
         storage_client = storage.Client()
         gs_bucket = storage_client.get_bucket(gs_bucket_name)
         for og_mask_pair in og_mask_tuples:
-            download_im_mask_pair(og_mask_pair[0], og_mask_pair[1], gs_bucket)
+            download_ims_mask_pair(og_mask_pair[0:3], og_mask_pair[3],
+                                   gs_bucket)
 
     create_train_test_data()
     return
