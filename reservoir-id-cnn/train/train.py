@@ -30,7 +30,9 @@ OG_COLS = 500
 RESIZE_ROWS = 512
 RESIZE_COLS = 512
 # Resized dimensions for training/testing.
-NUM_BANDS = 14
+BAND_SELECTION = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+# BAND_SELECTION = [0, 1, 2, 3, 12, 13]
+NUM_BANDS = len(BAND_SELECTION)
 # Number of bands in image.
 SMOOTH = 1.
 # Smoothing factor for dice and jaccard coefficients
@@ -74,17 +76,6 @@ def jaccard_distance_loss(y_true, y_pred, smooth=SMOOTH):
     return (1 - jac) * smooth
 
 
-def scale_image_tobyte(ar):
-    """Scale larger data type array to byte"""
-    min_val = np.min(ar)
-    max_val = np.max(ar)
-    byte_ar = (np.round(255.0 * (ar - min_val) / (max_val - min_val))
-               .astype(np.uint8))
-    byte_ar[ar == 0] = 0
-
-    return(byte_ar)
-
-
 def dice_coef(y_true, y_pred, smooth=SMOOTH):
     """Keras implementation of Dice coefficient"""
     y_true_f = K.flatten(y_true)
@@ -110,7 +101,57 @@ def dice_coef_loss(y_true, y_pred):
     return -dice_coef(y_true, y_pred)
 
 
-def get_unet(img_rows, img_cols, nbands):
+def dice_coef_wgt_loss(y_true, y_pred):
+    """Loss function is simply dice coefficient * -1"""
+    return -dice_coef_wgt(y_true, y_pred)
+
+
+def scale_image_tobyte(ar):
+    """Scale larger data type array to byte"""
+    min_val = np.min(ar)
+    max_val = np.max(ar)
+    byte_ar = (np.round(255.0 * (ar - min_val) / (max_val - min_val))
+               .astype(np.uint8))
+    byte_ar[ar == 0] = 0
+
+    return(byte_ar)
+
+
+def recall(y_true, y_pred):
+    """Recall metric.
+
+    Only computes a batch-wise average of recall.
+
+    Computes the recall, a metric for multi-label classification of
+    how many relevant items are selected.
+    """
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+    recall = true_positives / (possible_positives + K.epsilon())
+    return recall
+
+
+def precision(y_true, y_pred):
+    """Precision metric.
+
+    Only computes a batch-wise average of precision.
+
+    Computes the precision, a metric for multi-label classification of
+    how many selected items are relevant.
+    """
+    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+    predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+    precision = true_positives / (predicted_positives + K.epsilon())
+    return precision
+
+
+def f1(y_true, y_pred):
+    prec = precision(y_true, y_pred)
+    rec = recall(y_true, y_pred)
+    return 2*((prec*rec)/(prec+rec+K.epsilon()))
+
+
+def get_unet(img_rows, img_cols, nbands, loss_func):
     """U-Net Structure
 
     @author: jocicmarko
@@ -161,10 +202,10 @@ def get_unet(img_rows, img_cols, nbands):
 
     model = Model(inputs=[inputs], outputs=[conv10])
 
-    model.compile(optimizer=Adam(lr=5e-5),
-                  loss=dice_coef_loss,
+    model.compile(optimizer=Adam(lr=learn_rate),
+                  loss=loss_func,
                   metrics=[jaccard_coef, dice_coef,
-                           'accuracy'])
+                           precision, recall, f1])
 
     return model
 
@@ -181,7 +222,7 @@ def resize_imgs(imgs, nbands):
     return imgs_p
 
 
-def train():
+def train(learn_rate, loss_func):
     """Master function for training"""
     print('-'*30)
     print('Loading and preprocessing train data...')
@@ -192,6 +233,10 @@ def train():
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
     imgs_val = np.load('./data/prepped/imgs_val.npy')
     imgs_mask_val = np.load('./data/prepped/imgs_mask_val.npy')
+
+    # Select target bands
+    imgs_train = imgs_train[:, :, :, BAND_SELECTION]
+    imgs_val = imgs_val[:, :, :, BAND_SELECTION]
 
     imgs_train = resize_imgs(imgs_train, NUM_BANDS)
     imgs_mask_train = resize_imgs(imgs_mask_train, 1)
@@ -224,14 +269,14 @@ def train():
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
-    model = get_unet(RESIZE_ROWS, RESIZE_COLS, NUM_BANDS)
+    model = get_unet(RESIZE_ROWS, RESIZE_COLS, NUM_BANDS, loss_func)
 
     # Setup callbacks
     model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_loss',
                                        save_best_only=True)
     tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
                               write_images=True)
-    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=8,
+    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=16,
                                    verbose=0, mode='auto')
 
 
@@ -239,16 +284,27 @@ def train():
     print('Fitting model...')
     print('-'*30)
 
-    model.fit(imgs_train, imgs_mask_train, batch_size=8, epochs=500,
+    model.fit(imgs_train, imgs_mask_train, batch_size=12, epochs=500,
               verbose=1, shuffle=True,
               validation_data=(imgs_val, imgs_mask_val),
               callbacks=[model_checkpoint, tensorboard, early_stopping])
+
+
+    print('-'*30)
+    print('Loading saved weights for val, testing...')
+    print('-'*30)
+    model.load_weights('weights.h5')
+    val_eval = model.evaluate(imgs_val, imgs_mask_val, batch_size=12, verbose=0)
+    print('Final Val Scores: {}'.format(val_eval))
+
 
     print('-'*30)
     print('Loading and preprocessing test data...')
     print('-'*30)
     imgs_test = np.load('./data/prepped/imgs_test.npy')
     imgs_mask_test = np.load('./data/prepped/imgs_mask_test.npy')
+
+    imgs_test = imgs_test[:, :, :, BAND_SELECTION]
 
     imgs_test = resize_imgs(imgs_test, NUM_BANDS)
 
@@ -257,14 +313,9 @@ def train():
     imgs_test /= std
 
     print('-'*30)
-    print('Loading saved weights...')
-    print('-'*30)
-    model.load_weights('weights.h5')
-
-    print('-'*30)
     print('Predicting masks on test data...')
     print('-'*30)
-    pred_test_masks = model.predict(imgs_test, batch_size=8, verbose=1)
+    pred_test_masks = model.predict(imgs_test, batch_size=12, verbose=0)
 
     # Save predicted masks
     predict_dir = './data/predict/'
@@ -283,14 +334,13 @@ def train():
         true_mask = imgs_mask_test[i]
 
         # Get ndwi as byte
-        ndwi_img = imgs_test[i,:,:,4]
+        ndwi_img = imgs_test[i,:,:,NUM_BANDS-3]
         ndwi_img = transform.resize(ndwi_img,
                                     (OG_ROWS, OG_COLS),
                                     preserve_range = True)
         ndwi_img = scale_image_tobyte(ndwi_img)
         ndwi_img = ndwi_img.astype('uint8')
 
-        print(np.min(pred_mask), np.max(pred_mask))
         pred_mask = transform.resize(pred_mask,
                                      (OG_ROWS, OG_COLS),
                                      preserve_range = True)
@@ -324,7 +374,30 @@ def train():
           .format(total_false_positives,
                   total_false_positives/total_res_pixels))
 
-    return
+    # Record results as dictionary
+    out_dict = {}
+
+    # Validation results
+    out_dict['val_f1'] = val_eval[-1]
+    out_dict['val_recall'] = val_eval[-2]
+    out_dict['val_prec'] = val_eval[-3]
+
+    # Format test masks for eval
+    imgs_mask_test = resize_imgs(imgs_mask_test, 1)
+    imgs_mask_test = imgs_mask_test.astype('float32')
+    imgs_mask_test /= 255.  # scale masks to [0, 1]
+    imgs_mask_test[imgs_mask_test >= 0.5] = 1
+    imgs_mask_test[imgs_mask_test < 0.5] = 0
+
+    # Test results
+    test_eval = model.evaluate(imgs_test, imgs_mask_test,
+                               batch_size=12, verbose=0)
+    out_dict['test_f1'] = test_etest[-1]
+    out_dict['test_recall'] = test_etest[-2]
+    out_dict['test_prec'] = test_etest[-3]
+    print('Final Test Scores: {}'.format(test_eval))
+
+    return out_dict
 
 if __name__=='__main__':
-    train()
+    train(loss_funcs.dice_coef_loss, 1E-5)
