@@ -40,51 +40,6 @@ PRED_THRESHOLD = 0.5
 # Prediction threshold. > PRED_THRESHOLD will be classified as res.
 
 
-def jaccard_coef(y_true, y_pred, smooth=SMOOTH):
-    """Keras jaccard coefficient
-
-    @author: Vladimir Iglovikov
-    """
-
-    intersection = K.sum(y_true * y_pred, axis=[0, -1, -2])
-    sum_ = K.sum(y_true + y_pred, axis=[0, -1, -2])
-
-    jac = (intersection + smooth) / (sum_ - intersection + smooth)
-
-    return K.mean(jac)
-
-
-def jaccard_distance_loss(y_true, y_pred, smooth=SMOOTH):
-    """Keras jaccard loss function
-
-    Jaccard = (|X & Y|)/ (|X|+ |Y| - |X & Y|)
-            = sum(|A*B|)/(sum(|A|)+sum(|B|)-sum(|A*B|))
-
-    The jaccard distance loss is usefull for unbalanced datasets. This has been
-    shifted so it converges on 0 and is smoothed to avoid exploding or disapearing
-    gradient.
-
-    Ref: https://en.wikipedia.org/wiki/Jaccard_index
-
-    @url: https://gist.github.com/wassname/f1452b748efcbeb4cb9b1d059dce6f96
-    @author: wassname
-    """
-
-    intersection = K.sum(K.abs(y_true * y_pred), axis=-1)
-    sum_ = K.sum(K.abs(y_true) + K.abs(y_pred), axis=-1)
-    jac = (intersection + smooth) / (sum_ - intersection + smooth)
-    return (1 - jac) * smooth
-
-
-def dice_coef(y_true, y_pred, smooth=SMOOTH):
-    """Keras implementation of Dice coefficient"""
-    y_true_f = K.flatten(y_true)
-    y_pred_f = K.flatten(y_pred)
-    intersection = K.sum(y_true_f * y_pred_f)
-
-    return (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
-
-
 def dice_coef_wgt(y_true, y_pred, smooth=SMOOTH):
     """Modified Dice, with Positive class given double weight"""
     y_true_f = K.flatten(y_true)
@@ -276,7 +231,7 @@ def train(learn_rate, loss_func):
                                        save_best_only=True)
     tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
                               write_images=True)
-    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=16,
+    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=12,
                                    verbose=0, mode='auto')
 
 
@@ -284,7 +239,7 @@ def train(learn_rate, loss_func):
     print('Fitting model...')
     print('-'*30)
 
-    model.fit(imgs_train, imgs_mask_train, batch_size=12, epochs=500,
+    model.fit(imgs_train, imgs_mask_train, batch_size=16, epochs=500,
               verbose=1, shuffle=True,
               validation_data=(imgs_val, imgs_mask_val),
               callbacks=[model_checkpoint, tensorboard, early_stopping])
@@ -294,7 +249,7 @@ def train(learn_rate, loss_func):
     print('Loading saved weights for val, testing...')
     print('-'*30)
     model.load_weights('weights.h5')
-    val_eval = model.evaluate(imgs_val, imgs_mask_val, batch_size=12, verbose=0)
+    val_eval = model.evaluate(imgs_val, imgs_mask_val, batch_size=16, verbose=0)
     print('Final Val Scores: {}'.format(val_eval))
 
 
