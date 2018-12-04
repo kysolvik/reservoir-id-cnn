@@ -143,12 +143,12 @@ def pad_mask(img_mask):
 
 
 def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
-                           test_frac=0.2, val_frac=0.15):
+                           test_frac=0.2, val_frac=0.20):
     """Save training and test data into easy .npy file"""
 
     # Get mask image names and base image patterns
     mask_images = glob.glob('{}*mask.png'.format(data_path))
-    image_patterns = mask_images.replace('_mask.png', '')
+    image_patterns = [mi.replace('mask.png', '') for mi in mask_images]
 
     total_ims = len(mask_images)
 
@@ -163,25 +163,26 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
     for image_base in image_patterns:
 
         # Prep mask
-        image_mask_name = '{}_mask.png'.format(os.path.basename(image_base))
+        image_mask_name = '{}mask.png'.format(os.path.basename(image_base))
         img_mask = io.imread(os.path.join(data_path, image_mask_name),
                                 as_grey=True)
-        img_mask = np.array([img_mask])
+        img_mask = np.array(img_mask)
         imgs_mask[i] = img_mask
 
         og_img_list = []
         for og_img in sorted(glob.glob('{}*og.tif'.format(image_base))):
-            img = io.imread(os.path.join(data_path, image_name), as_grey=False)
-            img = np.array([img])
+            # Using sorted, the order is: s2 10m, s1 10m, s2 20m.
+            img = io.imread(og_img, as_grey=False)
+            img = np.array(img)
             og_img_list += [img]
 
-        imgs[i] = np.dstack(tuple(og_img_list))
+        imgs[i] = np.dstack(og_img_list)
 
         if i % 100 == 0:
             print('Done: {}/{} images'.format(i, total_ims))
         i += 1
 
-        og_img_names += [image_name]
+        og_img_names += [os.path.basename(og_img)]
 
     print('Loading done.')
 
