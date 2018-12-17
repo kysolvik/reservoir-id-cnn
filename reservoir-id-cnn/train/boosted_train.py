@@ -20,7 +20,8 @@ from keras.optimizers import Adam, SGD
 from keras.callbacks import ModelCheckpoint, TensorBoard, EarlyStopping
 from keras import backend as K
 from skimage import io
-import loss_functions as lf
+from keras.wrappers.scikit_learn import KerasClassifier
+from sklearn.ensemble import AdaBoostClassifier
 
 
 K.set_image_data_format('channels_last')  # TF dimension ordering in this code
@@ -31,9 +32,52 @@ OG_COLS = 500
 RESIZE_ROWS = 512
 RESIZE_COLS = 512
 # Resized dimensions for training/testing.
+BAND_SELECTION = [0, 1, 2, 3, 4, 5, 7, 10, 11, 12, 13]
+NUM_BANDS = len(BAND_SELECTION)
 # Number of bands in image.
+SMOOTH = 1.
+# Smoothing factor for dice and jaccard coefficients
 PRED_THRESHOLD = 0.5
 # Prediction threshold. > PRED_THRESHOLD will be classified as res.
+
+
+def jaccard_coef(y_true, y_pred, smooth=SMOOTH):
+    """Keras jaccard coefficient
+
+    @author: Vladimir Iglovikov
+    """
+
+    intersection = K.sum(y_true * y_pred, axis=[0, -1, -2])
+    sum_ = K.sum(y_true + y_pred, axis=[0, -1, -2])
+
+    jac = (intersection + smooth) / (sum_ - intersection + smooth)
+
+    return K.mean(jac)
+
+def jaccard_coef_loss(y_true, y_pred):
+    """Loss function is simply dice coefficient * -1"""
+    return -jaccard_coef(y_true, y_pred)
+
+def jaccard_distance_loss(y_true, y_pred, smooth=SMOOTH):
+    """Keras jaccard loss function
+
+    Jaccard = (|X & Y|)/ (|X|+ |Y| - |X & Y|)
+            = sum(|A*B|)/(sum(|A|)+sum(|B|)-sum(|A*B|))
+
+    The jaccard distance loss is usefull for unbalanced datasets. This has been
+    shifted so it converges on 0 and is smoothed to avoid exploding or disapearing
+    gradient.
+
+    Ref: https://en.wikipedia.org/wiki/Jaccard_index
+
+    @url: https://gist.github.com/wassname/f1452b748efcbeb4cb9b1d059dce6f96
+    @author: wassname
+    """
+
+    intersection = K.sum(K.abs(y_true * y_pred), axis=-1)
+    sum_ = K.sum(K.abs(y_true) + K.abs(y_pred), axis=-1)
+    jac = (intersection + smooth) / (sum_ - intersection + smooth)
+    return (1 - jac) * smooth
 
 
 def scale_image_tobyte(ar):
@@ -47,41 +91,36 @@ def scale_image_tobyte(ar):
     return(byte_ar)
 
 
-def recall(y_true, y_pred):
-    """Recall metric.
+def dice_coef(y_true, y_pred, smooth=SMOOTH):
+    """Keras implementation of Dice coefficient"""
+    y_true_f = K.flatten(y_true)
+    y_pred_f = K.flatten(y_pred)
+    intersection = K.sum(y_true_f * y_pred_f)
 
-    Only computes a batch-wise average of recall.
-
-    Computes the recall, a metric for multi-label classification of
-    how many relevant items are selected.
-    """
-    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
-    possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
-    recall = true_positives / (possible_positives + K.epsilon())
-    return recall
+    return (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
 
 
-def precision(y_true, y_pred):
-    """Precision metric.
+def dice_coef_wgt(y_true, y_pred, smooth=SMOOTH):
+    """Modified Dice, with Positive class given double weight"""
+    y_true_f = K.flatten(y_true)
+    y_pred_f = K.flatten(y_pred)
+    weights = K.cast(K.greater(y_true_f, 0.5), dtype='float32')
+    weights = weights + K.ones_like(weights)
+    intersection = K.sum(y_true_f * y_pred_f * weights)
 
-    Only computes a batch-wise average of precision.
-
-    Computes the precision, a metric for multi-label classification of
-    how many selected items are relevant.
-    """
-    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
-    predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
-    precision = true_positives / (predicted_positives + K.epsilon())
-    return precision
+    return (2. * intersection + smooth) / (K.sum(y_true_f * weights) + K.sum(y_pred_f * weights) + smooth)
 
 
-def f1(y_true, y_pred):
-    prec = precision(y_true, y_pred)
-    rec = recall(y_true, y_pred)
-    return 2*((prec*rec)/(prec+rec+K.epsilon()))
+def dice_coef_loss(y_true, y_pred):
+    """Loss function is simply dice coefficient * -1"""
+    return -dice_coef(y_true, y_pred)
+
+def dice_coef_wgt_loss(y_true, y_pred):
+    """Loss function is simply dice coefficient * -1"""
+    return -dice_coef_wgt(y_true, y_pred)
 
 
-def get_unet(img_rows, img_cols, nbands, loss_func, learn_rate):
+def get_unet(img_rows, img_cols, nbands):
     """U-Net Structure
 
     @author: jocicmarko
@@ -130,12 +169,14 @@ def get_unet(img_rows, img_cols, nbands, loss_func, learn_rate):
 
     conv10 = Conv2D(1, (1, 1), activation='sigmoid')(conv9)
 
-    model = Model(inputs=[inputs], outputs=[conv10])
+    flattened = Flatten()(conv10)
 
-    model.compile(optimizer=Adam(lr=learn_rate),
-                  loss=loss_func,
-                  metrics=[lf.jaccard_coef, lf.dice_coef,
-                           precision, recall, f1])
+    model = Model(inputs=[inputs], outputs=[flattened])
+
+    model.compile(optimizer=Adam(lr=1e-5),
+                  loss=dice_coef_wgt_loss,
+                  metrics=[jaccard_coef, dice_coef,
+                           'accuracy'])
 
     return model
 
@@ -152,7 +193,7 @@ def resize_imgs(imgs, nbands):
     return imgs_p
 
 
-def train(learn_rate, loss_func, band_selection):
+def train():
     """Master function for training"""
     print('-'*30)
     print('Loading and preprocessing train data...')
@@ -165,14 +206,12 @@ def train(learn_rate, loss_func, band_selection):
     imgs_mask_val = np.load('./data/prepped/imgs_mask_val.npy')
 
     # Select target bands
-    imgs_train = imgs_train[:, :, :, band_selection]
-    imgs_val = imgs_val[:, :, :, band_selection]
+    imgs_train = imgs_train[:, :, :, BAND_SELECTION]
+    imgs_val = imgs_val[:, :, :, BAND_SELECTION]
 
-    num_bands = len(band_selection)
-
-    imgs_train = resize_imgs(imgs_train, num_bands)
+    imgs_train = resize_imgs(imgs_train, NUM_BANDS)
     imgs_mask_train = resize_imgs(imgs_mask_train, 1)
-    imgs_val = resize_imgs(imgs_val, num_bands)
+    imgs_val = resize_imgs(imgs_val, NUM_BANDS)
     imgs_mask_val = resize_imgs(imgs_mask_val, 1)
 
     imgs_train = imgs_train.astype('float32')
@@ -201,34 +240,30 @@ def train(learn_rate, loss_func, band_selection):
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
-    model = get_unet(RESIZE_ROWS, RESIZE_COLS, num_bands, loss_func, learn_rate)
 
     # Setup callbacks
-    model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_f1',
-                                       mode='max', save_best_only=True)
+    model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_loss',
+                                       save_best_only=True)
     tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
                               write_images=True)
-    early_stopping = EarlyStopping(monitor='val_f1', min_delta=0, patience=20,
-                                   verbose=0, mode='max')
+    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=15,
+                                   verbose=0, mode='auto')
 
 
     print('-'*30)
     print('Fitting model...')
     print('-'*30)
 
-    model.fit(imgs_train, imgs_mask_train, batch_size=12, epochs=500,
-              verbose=2, shuffle=True,
-              validation_data=(imgs_val, imgs_mask_val),
-              callbacks=[model_checkpoint, tensorboard, early_stopping])
+    u_net_estimator = KerasClassifier(
+        build_fn=get_unet,
+        img_rows=RESIZE_ROWS, img_cols=RESIZE_COLS, nbands=NUM_BANDS,
+        batch_size=20, epochs=500,
+        verbose=1, shuffle=True,
+        validation_data=(imgs_val, imgs_mask_val),
+        callbacks=[model_checkpoint, tensorboard, early_stopping])
 
-
-    print('-'*30)
-    print('Loading saved weights for val, testing...')
-    print('-'*30)
-    model.load_weights('weights.h5')
-    val_eval = model.evaluate(imgs_val, imgs_mask_val, batch_size=12, verbose=0)
-    print('Final Val Scores: {}'.format(val_eval))
-
+    boosted_u_net = AdaBoostClassifier(base_estimator= u_net_estimator)
+    boosted_u_net.fit(imgs_train, np.ravel(imgs_mask_train))
 
     print('-'*30)
     print('Loading and preprocessing test data...')
@@ -236,18 +271,23 @@ def train(learn_rate, loss_func, band_selection):
     imgs_test = np.load('./data/prepped/imgs_test.npy')
     imgs_mask_test = np.load('./data/prepped/imgs_mask_test.npy')
 
-    imgs_test = imgs_test[:, :, :, band_selection]
+    imgs_test = imgs_test[:, :, :, BAND_SELECTION]
 
-    imgs_test = resize_imgs(imgs_test, num_bands)
+    imgs_test = resize_imgs(imgs_test, NUM_BANDS)
 
     imgs_test = imgs_test.astype('float32')
     imgs_test -= mean
     imgs_test /= std
 
     print('-'*30)
+    print('Loading saved weights...')
+    print('-'*30)
+    boosted_u_net.load_weights('weights.h5')
+
+    print('-'*30)
     print('Predicting masks on test data...')
     print('-'*30)
-    pred_test_masks = model.predict(imgs_test, batch_size=12, verbose=0)
+    pred_test_masks = boosted_u_net.predict(imgs_test, batch_size=20, verbose=1)
 
     # Save predicted masks
     predict_dir = './data/predict/'
@@ -266,13 +306,14 @@ def train(learn_rate, loss_func, band_selection):
         true_mask = imgs_mask_test[i]
 
         # Get ndwi as byte
-        ndwi_img = imgs_test[i,:,:,num_bands-2]
+        ndwi_img = imgs_test[i,:,:,NUM_BANDS-3]
         ndwi_img = transform.resize(ndwi_img,
                                     (OG_ROWS, OG_COLS),
                                     preserve_range = True)
         ndwi_img = scale_image_tobyte(ndwi_img)
         ndwi_img = ndwi_img.astype('uint8')
 
+        print(np.min(pred_mask), np.max(pred_mask))
         pred_mask = transform.resize(pred_mask,
                                      (OG_ROWS, OG_COLS),
                                      preserve_range = True)
@@ -306,30 +347,7 @@ def train(learn_rate, loss_func, band_selection):
           .format(total_false_positives,
                   total_false_positives/total_res_pixels))
 
-    # Record results as dictionary
-    out_dict = {}
-
-    # Validation results
-    out_dict['val_f1'] = val_eval[-1]
-    out_dict['val_recall'] = val_eval[-2]
-    out_dict['val_prec'] = val_eval[-3]
-
-    # Format test masks for eval
-    imgs_mask_test = resize_imgs(imgs_mask_test, 1)
-    imgs_mask_test = imgs_mask_test.astype('float32')
-    imgs_mask_test /= 255.  # scale masks to [0, 1]
-    imgs_mask_test[imgs_mask_test >= 0.5] = 1
-    imgs_mask_test[imgs_mask_test < 0.5] = 0
-
-    # Test results
-    test_eval = model.evaluate(imgs_test, imgs_mask_test,
-                               batch_size=12, verbose=0)
-    out_dict['test_f1'] = test_eval[-1]
-    out_dict['test_recall'] = test_eval[-2]
-    out_dict['test_prec'] = test_eval[-3]
-    print('Final Test Scores: {}'.format(test_eval))
-
-    return out_dict
+    return
 
 if __name__=='__main__':
-    train(lf.dice_coef_wgt_loss, 7.5E-5)
+    train()
