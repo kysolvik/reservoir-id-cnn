@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+from keras import backend as K
+
+SMOOTH = 1.
+# Smoothing factor for dice and jaccard coefficients
+
 def jaccard_coef(y_true, y_pred, smooth=SMOOTH):
     """Keras jaccard coefficient
 

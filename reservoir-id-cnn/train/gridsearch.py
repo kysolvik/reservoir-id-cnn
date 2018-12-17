@@ -15,24 +15,34 @@ import json
 import loss_functions as lf
 
 def main():
-    lr_list = [1e-5, 5e-5, 7.5e-5, 1e-4, 5e-4]
-    lf_list = ['binary_cross_entropy', lf.dice_coef_loss, lf.jaccard_distance_loss]
+    lr_list = [5e-5, 7.5e-5, 1e-4]
+    lf_list = [lf.dice_coef_wgt_loss, lf.dice_coef_loss]
+    band_combo_dict = {
+        'all':list(range(16)),
+        'all_old': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15],
+        'rgbn_nds_radar': [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+        'rgbn_nds_radar_old': [0, 1, 2, 3, 4, 5, 14, 15],
+        'rgbn_nds_old': [0, 1, 2, 3, 14, 15]}
+
 
     out_dict = {}
-    for lf in lf_list:
-        if type(lf) == str:
-            lf_name = lf
+    for lfunc in lf_list:
+        if type(lfunc) == str:
+            lf_name = lfunc
         else:
-            lf_name = lf.__name__
+            lf_name = lfunc.__name__
         out_dict[lf_name] = {}
         for lr in lr_list:
-            train_results = train.train(lr, lf)
-            out_dict[lf_name][str(lr)] = train_results
+            out_dict[lf_name][str(lr)] = {}
+            for bc_name in band_combo_dict.keys():
+                train_results = train.train(lr, lfunc, band_combo_dict[bc_name])
+                out_dict[lf_name][str(lr)][bc_name] = train_results
+
+    print(out_dict)
 
     with open('grid_results.json', 'w') as fp:
         json.dump(out_dict, fp, sort_keys=True, indent=4)
 
-    print(out_dict)
 
     return
 

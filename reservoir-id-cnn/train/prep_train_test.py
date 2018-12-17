@@ -186,11 +186,18 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
 
     print('Loading done.')
 
-    # Add NDWI band
+    # Add  Gao NDWI
+    imgs = add_nd(imgs, 3, 11)
+
+    # Add  MNDWI
+    imgs = add_nd(imgs, 1, 11)
+
+    # Add McFeeters NDWI band
     imgs = add_nd(imgs, 1, 3)
 
     # Add NDVI band
     imgs = add_nd(imgs, 3, 2)
+
 
     # Split into training, validation, and test sets.
     train_count = round(total_ims * (1 - test_frac - val_frac))
