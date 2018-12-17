@@ -1,5 +1,5 @@
 # reservoir-id-cnn
-Man-Made Reservoir Identification using convolutional neural network.
+Human-Made Reservoir Identification using U-Net convolutional neural network.
 
 
 ## Requirements
