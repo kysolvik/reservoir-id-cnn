@@ -276,7 +276,7 @@ def train(learn_rate, loss_func, band_selection):
         pred_mask = transform.resize(pred_mask,
                                      (OG_ROWS, OG_COLS),
                                      preserve_range = True)
-        pred_mask = (pred_mask[:, :, 0] * 255.).astype(np.uint8)
+        pred_mask = (pred_mask[:, :, 0] * 255).astype(np.uint8)
 
         # Save predicted masks
         pred_mask_filename = test_img_names[i].replace('og.tif', 'predmask.png')
@@ -332,4 +332,4 @@ def train(learn_rate, loss_func, band_selection):
     return out_dict
 
 if __name__=='__main__':
-    train(lf.dice_coef_wgt_loss, 7.5E-5)
+    train(6.5E-5, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 14, 15])

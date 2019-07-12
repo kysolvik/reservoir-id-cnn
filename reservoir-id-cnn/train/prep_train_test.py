@@ -23,7 +23,7 @@ import augment_data as augment
 import glob
 
 # Set random seed for
-random.seed(5783)
+random.seed(5787)
 
 def argparse_init():
     """Prepare ArgumentParser for inputs."""
@@ -49,6 +49,14 @@ def find_ims_masks(labelbox_json):
 
     # URLs for original images
     og_urls = label_df['Labeled Data'].replace('ndwi.png', 'og.tif', regex=True)
+
+    # Keep track of flips
+    flip_time = '2019-01-01T00:00:00.000Z'
+    og_names = og_urls.str.split('/').str[-1]
+    flip_names = og_names.loc[label_df['Created At'] < flip_time].tolist()
+    with open('flip_names.txt', 'w') as f:
+        for item in flip_names:
+            f.write("%s\n" % item)
 
     # URLS for
     s1_urls = label_df['Labeled Data'].replace(
@@ -145,6 +153,8 @@ def pad_mask(img_mask):
 def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
                            test_frac=0.2, val_frac=0.20):
     """Save training and test data into easy .npy file"""
+    flip_names = [line.rstrip('\n') for line in open('flip_names.txt')]
+
 
     # Get mask image names and base image patterns
     mask_images = glob.glob('{}*mask.png'.format(data_path))
@@ -153,6 +163,7 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
     total_ims = len(mask_images)
 
     imgs = np.ndarray((total_ims, dim_x, dim_y, nbands), dtype=np.uint16)
+    imgs_ndwi = np.ndarray((total_ims, dim_x, dim_y), dtype=np.uint16)
     imgs_mask = np.ndarray((total_ims, dim_x, dim_y), dtype=np.uint8)
 
     i = 0
@@ -167,6 +178,18 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
         img_mask = io.imread(os.path.join(data_path, image_mask_name),
                                 as_grey=True)
         img_mask = np.array(img_mask)
+        img_mask[img_mask==1] = 255
+
+        ### Labelbox quirks
+        # If only one pixel non-zero in mask, set to all 0s
+        if np.sum(img_mask) == 255:
+            img_mask[:] = 0
+
+        # Flip over 0 axis, bc labelbox decided to flip the masks
+        if '{}og.tif'.format(os.path.basename(image_base)) in flip_names:
+            print('flipping','{}og.tif'.format(image_base), image_mask_name)
+            img_mask = np.flip(img_mask, axis=0)
+
         imgs_mask[i] = img_mask
 
         og_img_list = []
@@ -188,6 +211,7 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
 
     # Add  Gao NDWI
     imgs = add_nd(imgs, 3, 11)
+    imgs_ndwi = imgs[:,:,:,-1]
 
     # Add  MNDWI
     imgs = add_nd(imgs, 1, 11)
@@ -197,7 +221,6 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
 
     # Add NDVI band
     imgs = add_nd(imgs, 3, 2)
-
 
     # Split into training, validation, and test sets.
     train_count = round(total_ims * (1 - test_frac - val_frac))
@@ -219,6 +242,7 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
     imgs_mask_val = imgs_mask[val_indices]
     val_img_names = [og_img_names[i] for i in val_indices]
 
+
     # Augment training data
     new_imgs = np.zeros_like(imgs_train)
     new_masks = np.zeros_like(imgs_mask_train)
@@ -226,25 +250,34 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
         new_imgs[i], new_masks[i] = augment.random_aug(
             imgs_train[i],
             imgs_mask_train[i])
-    new_imgs2 = np.zeros_like(imgs_train)
-    new_masks2 = np.zeros_like(imgs_mask_train)
-    for i in range(imgs_train.shape[0]):
-        new_imgs2[i], new_masks2[i] = augment.random_aug(
-            imgs_train[i],
-            imgs_mask_train[i])
-    imgs_train = np.vstack((imgs_train, new_imgs, new_imgs2))
-    imgs_mask_train = np.vstack((imgs_mask_train, new_masks, new_masks2))
+#     new_imgs2 = np.zeros_like(imgs_train)
+#     new_masks2 = np.zeros_like(imgs_mask_train)
+#     for i in range(imgs_train.shape[0]):
+#         new_imgs2[i], new_masks2[i] = augment.random_aug(
+#             imgs_train[i],
+#             imgs_mask_train[i])
+#     imgs_train = np.vstack((imgs_train, new_imgs, new_imgs2))
+#     imgs_mask_train = np.vstack((imgs_mask_train, new_masks, new_masks2))
+    imgs_train = np.vstack((imgs_train, new_imgs))
+    imgs_mask_train = np.vstack((imgs_mask_train, new_masks))
 
     # Write images
     prepped_path = '{}/prepped/'.format(data_path)
     if not os.path.isdir(prepped_path):
            os.makedirs(prepped_path)
+    print('Saving...')
     np.save('{}imgs_train.npy'.format(prepped_path), imgs_train)
     np.save('{}imgs_mask_train.npy'.format(prepped_path), imgs_mask_train)
     np.save('{}imgs_test.npy'.format(prepped_path), imgs_test)
     np.save('{}imgs_mask_test.npy'.format(prepped_path), imgs_mask_test)
     np.save('{}imgs_val.npy'.format(prepped_path), imgs_val)
     np.save('{}imgs_mask_val.npy'.format(prepped_path), imgs_mask_val)
+    # Just for ndwi viewing: can delete later
+    imgs_ndwi_test = imgs_ndwi[test_indices]
+    imgs_ndwi_val = imgs_ndwi[val_indices]
+    np.save('{}imgs_ndwi_test.npy'.format(prepped_path), imgs_ndwi_test)
+    np.save('{}imgs_ndwi_val.npy'.format(prepped_path), imgs_ndwi_val)
+    print('Saved...')
 
     # Write image names
     with open('{}train_names.csv'.format(prepped_path), 'w') as wf:

@@ -13,16 +13,18 @@ Notes:
 import train
 import json
 import loss_functions as lf
+from collections import OrderedDict
 
 def main():
-    lr_list = [5e-5, 7.5e-5, 1e-4]
-    lf_list = [lf.dice_coef_wgt_loss, lf.dice_coef_loss]
-    band_combo_dict = {
-        'all':list(range(16)),
-        'all_old': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15],
-        'rgbn_nds_radar': [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
-        'rgbn_nds_radar_old': [0, 1, 2, 3, 4, 5, 14, 15],
-        'rgbn_nds_old': [0, 1, 2, 3, 14, 15]}
+    lr_list = [1.0e-4, 7.5e-5, 5e-5]
+    lf_list = [lf.dice_coef_wgt_loss]
+    band_combo_dict = OrderedDict([
+#         ('all',list(range(16))),
+#         ('all_old', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15]),
+        ('rgbn_nds_radar', [0, 1, 2, 3, 4, 5, 12, 13, 14, 15]),
+#         ('rgbn_nds', [0, 1, 2, 3, 12, 13, 14, 15]),
+#         ('rgbn_nds_radar_old', [0, 1, 2, 3, 4, 5, 14, 15])
+    ])
 
 
     out_dict = {}
@@ -34,9 +36,12 @@ def main():
         out_dict[lf_name] = {}
         for lr in lr_list:
             out_dict[lf_name][str(lr)] = {}
-            for bc_name in band_combo_dict.keys():
+            for bc_name in sorted(band_combo_dict.keys()):
+                print("STARTING:", bc_name, lf_name, lr)
                 train_results = train.train(lr, lfunc, band_combo_dict[bc_name])
                 out_dict[lf_name][str(lr)][bc_name] = train_results
+                print("DONE:", bc_name, lf_name, lr)
+                print("SO FAR:", out_dict)
 
     print(out_dict)
 
