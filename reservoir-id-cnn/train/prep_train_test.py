@@ -34,8 +34,16 @@ def argparse_init():
     p.add_argument('labelbox_json',
                    help='Path to LabelBox exported JSON.',
                    type=str)
-    p.add_argument('--no_download',
+    p.add_argument('--no-download',
                    help='Skip download step, just do ingestion.',
+                   default=False,
+                   action='store_true')
+    p.add_argument('--no-val',
+                   help='Don\'t create  a validation set, just train and test',
+                   default=False,
+                   action='store_true')
+    p.add_argument('--no-test',
+                   help='Skip val and test sets, just creating a training set',
                    default=False,
                    action='store_true')
     return p
@@ -150,8 +158,86 @@ def pad_mask(img_mask):
     return img_mask_padded
 
 
+def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac):
+    """Split data into train, test, val (or just train)
+
+    Returns:
+        3 dictionaries containing imgs, masks, and img names
+
+    """
+    name_dict = {}
+    img_dict = {}
+    mask_dict = {}
+
+    total_ims = imgs.shape[0]
+    if test_frac != 0:
+
+        train_count = round(total_ims * (1 - test_frac - val_frac))
+        train_indices = random.sample(range(total_ims), train_count)
+        test_val_indices = np.delete(np.array(range(total_ims)), train_indices)
+
+        test_count = round(total_ims * test_frac)
+        test_indices = random.sample(list(test_val_indices), test_count)
+
+        img_dict['train'] = imgs[train_indices]
+        mask_dict['train'] = imgs_mask[train_indices]
+        name_dict['train'] = [img_names[i] for i in train_indices]
+
+        img_dict['test'] = imgs[test_indices]
+        mask_dict['test'] = imgs_mask[test_indices]
+        name_dict['test'] = [img_names[i] for i in test_indices]
+
+        if val_frac != 0:
+            val_indices = np.delete(np.array(range(total_ims)),
+                                    np.append(train_indices, test_indices))
+            img_dict['val'] = imgs[val_indices]
+            mask_dict['val'] = imgs_mask[val_indices]
+            name_dict['val'] = [img_names[i] for i in val_indices]
+
+    else:
+        img_dict['train'] = imgs
+        mask_dict['train'] = imgs_mask
+        name_dict['train'] = img_names
+
+    return img_dict, mask_dict, name_dict
+
+
+def augment_all_training(imgs_train, imgs_mask_train):
+    new_imgs = np.zeros_like(imgs_train)
+    new_masks = np.zeros_like(imgs_mask_train)
+    for i in range(imgs_train.shape[0]):
+        new_imgs[i], new_masks[i] = augment.random_aug(
+            imgs_train[i],
+            imgs_mask_train[i])
+    imgs_train = np.vstack((imgs_train, new_imgs))
+    imgs_mask_train = np.vstack((imgs_mask_train, new_masks))
+
+    return imgs_train, imgs_mask_train
+
+
+def write_prepped_data(data_path, img_dict, mask_dict, name_dict):
+    prepped_path = '{}/prepped/'.format(data_path)
+    if not os.path.isdir(prepped_path):
+           os.makedirs(prepped_path)
+    print('Saving...')
+    for key in img_dict.keys():
+        print(img_dict[key].shape)
+        print(mask_dict[key].shape)
+        np.save('{}imgs_{}.npy'.format(prepped_path, key), img_dict[key])
+        np.save('{}imgs_mask_{}.npy'.format(prepped_path, key), mask_dict[key])
+        # Write image names
+        with open('{}{}_names.csv'.format(prepped_path, key), 'w') as wf:
+            for img_name in name_dict[key]:
+                wf.write('{}\n'.format(img_name))
+    print('Saved...')
+
+    print('Saving to .npy files done.')
+
+    return
+
+
 def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
-                           test_frac=0.2, val_frac=0.20):
+                           test_frac=0.2, val_frac=0.2):
     """Save training and test data into easy .npy file"""
     flip_names = [line.rstrip('\n') for line in open('flip_names.txt')]
 
@@ -163,7 +249,6 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
     total_ims = len(mask_images)
 
     imgs = np.ndarray((total_ims, dim_x, dim_y, nbands), dtype=np.uint16)
-    imgs_ndwi = np.ndarray((total_ims, dim_x, dim_y), dtype=np.uint16)
     imgs_mask = np.ndarray((total_ims, dim_x, dim_y), dtype=np.uint8)
 
     i = 0
@@ -211,88 +296,23 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
 
     # Add  Gao NDWI
     imgs = add_nd(imgs, 3, 11)
-    imgs_ndwi = imgs[:,:,:,-1]
-
     # Add  MNDWI
     imgs = add_nd(imgs, 1, 11)
-
     # Add McFeeters NDWI band
     imgs = add_nd(imgs, 1, 3)
-
     # Add NDVI band
     imgs = add_nd(imgs, 3, 2)
 
-    # Split into training, validation, and test sets.
-    train_count = round(total_ims * (1 - test_frac - val_frac))
-    train_indices = random.sample(range(total_ims), train_count)
-    test_val_indices = np.delete(np.array(range(total_ims)), train_indices)
-
-    test_count = round(total_ims * test_frac)
-    test_indices = random.sample(list(test_val_indices), test_count)
-    val_indices = np.delete(np.array(range(total_ims)),
-                            np.append(train_indices, test_indices))
-
-    imgs_train = imgs[train_indices]
-    imgs_mask_train = imgs_mask[train_indices]
-    train_img_names = [og_img_names[i] for i in train_indices]
-    imgs_test = imgs[test_indices]
-    imgs_mask_test = imgs_mask[test_indices]
-    test_img_names = [og_img_names[i] for i in test_indices]
-    imgs_val = imgs[val_indices]
-    imgs_mask_val = imgs_mask[val_indices]
-    val_img_names = [og_img_names[i] for i in val_indices]
-
+    # Split into training, test, val
+    img_dict, mask_dict, name_dict = split_train_test(
+        imgs, imgs_mask, og_img_names, test_frac, val_frac)
 
     # Augment training data
-    new_imgs = np.zeros_like(imgs_train)
-    new_masks = np.zeros_like(imgs_mask_train)
-    for i in range(imgs_train.shape[0]):
-        new_imgs[i], new_masks[i] = augment.random_aug(
-            imgs_train[i],
-            imgs_mask_train[i])
-#     new_imgs2 = np.zeros_like(imgs_train)
-#     new_masks2 = np.zeros_like(imgs_mask_train)
-#     for i in range(imgs_train.shape[0]):
-#         new_imgs2[i], new_masks2[i] = augment.random_aug(
-#             imgs_train[i],
-#             imgs_mask_train[i])
-#     imgs_train = np.vstack((imgs_train, new_imgs, new_imgs2))
-#     imgs_mask_train = np.vstack((imgs_mask_train, new_masks, new_masks2))
-    imgs_train = np.vstack((imgs_train, new_imgs))
-    imgs_mask_train = np.vstack((imgs_mask_train, new_masks))
+    img_dict['train'], mask_dict['train'] = augment_all_training(
+        img_dict['train'], mask_dict['train'])
 
     # Write images
-    prepped_path = '{}/prepped/'.format(data_path)
-    if not os.path.isdir(prepped_path):
-           os.makedirs(prepped_path)
-    print('Saving...')
-    np.save('{}imgs_train.npy'.format(prepped_path), imgs_train)
-    np.save('{}imgs_mask_train.npy'.format(prepped_path), imgs_mask_train)
-    np.save('{}imgs_test.npy'.format(prepped_path), imgs_test)
-    np.save('{}imgs_mask_test.npy'.format(prepped_path), imgs_mask_test)
-    np.save('{}imgs_val.npy'.format(prepped_path), imgs_val)
-    np.save('{}imgs_mask_val.npy'.format(prepped_path), imgs_mask_val)
-    # Just for ndwi viewing: can delete later
-    imgs_ndwi_test = imgs_ndwi[test_indices]
-    imgs_ndwi_val = imgs_ndwi[val_indices]
-    np.save('{}imgs_ndwi_test.npy'.format(prepped_path), imgs_ndwi_test)
-    np.save('{}imgs_ndwi_val.npy'.format(prepped_path), imgs_ndwi_val)
-    print('Saved...')
-
-    # Write image names
-    with open('{}train_names.csv'.format(prepped_path), 'w') as wf:
-        for img_name in train_img_names:
-            wf.write('{}\n'.format(img_name))
-    with open('{}test_names.csv'.format(prepped_path), 'w') as wf:
-        for img_name in test_img_names:
-            wf.write('{}\n'.format(img_name))
-    with open('{}val_names.csv'.format(prepped_path), 'w') as wf:
-        for img_name in val_img_names:
-            wf.write('{}\n'.format(img_name))
-
-    print('Saving to .npy files done.')
-
-    return
+    write_prepped_data(data_path, img_dict, mask_dict, name_dict)
 
 
 def main():
@@ -300,7 +320,6 @@ def main():
     # Get command line args
     parser = argparse_init()
     args = parser.parse_args()
-
 
     if not args.no_download:
         og_mask_tuples, gs_bucket_name = find_ims_masks(args.labelbox_json)
@@ -312,7 +331,16 @@ def main():
             download_ims_mask_pair(og_mask_pair[0:3], og_mask_pair[3],
                                    gs_bucket)
 
-    create_train_test_data()
+    val_frac = 0.2
+    test_frac = 0.2
+    if args.no_test:
+        test_frac = 0
+        val_frac = 0
+    if args.no_val:
+        val_frac = 0
+
+    create_train_test_data(val_frac=val_frac, test_frac=test_frac)
+
     return
 
 
