@@ -213,7 +213,7 @@ def train(learn_rate, loss_func, band_selection, test, val):
                                        mode='max', save_best_only=True)
     tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
                               write_images=True)
-    early_stopping = EarlyStopping(monitor='val_f1', min_delta=0, patience=20,
+    early_stopping = EarlyStopping(monitor='val_f1', min_delta=0, patience=25,
                                    verbose=0, mode='max')
 
 
@@ -222,7 +222,7 @@ def train(learn_rate, loss_func, band_selection, test, val):
     print('-'*30)
 
     model.fit(imgs_train, imgs_mask_train, batch_size=12, epochs=500,
-              verbose=2, shuffle=True,
+              verbose=2, shuffle=False,
               validation_data=val_data,
               validation_split=val_split,
               callbacks=[model_checkpoint, tensorboard, early_stopping])
@@ -248,7 +248,8 @@ def train(learn_rate, loss_func, band_selection, test, val):
         print('-'*30)
         imgs_test = np.load('./data/prepped/imgs_test.npy')
         imgs_mask_test = np.load('./data/prepped/imgs_mask_test.npy')
-        imgs_test, imgs_mask_test = preprocess(imgs_val, imgs_mask_val, band_selection)
+        imgs_mask_test_og = imgs_mask_test.copy()
+        imgs_test, imgs_mask_test = preprocess(imgs_test, imgs_mask_test, band_selection)
         imgs_test -= mean
         imgs_test /= std
 
@@ -264,6 +265,7 @@ def train(learn_rate, loss_func, band_selection, test, val):
 
         np.save('{}pred_test_masks.npy'.format(predict_dir), pred_test_masks)
         test_img_names = open('./data/prepped/test_names.csv').read().splitlines()
+
 
         # For calculating total error metrics
         total_res_pixels = 0
@@ -281,10 +283,16 @@ def train(learn_rate, loss_func, band_selection, test, val):
             ndwi_img = scale_image_tobyte(ndwi_img)
             ndwi_img = ndwi_img.astype('uint8')
 
+            # Resize masks
             pred_mask = transform.resize(pred_mask,
                                         (OG_ROWS, OG_COLS),
                                         preserve_range = True)
             pred_mask = (pred_mask[:, :, 0] * 255).astype(np.uint8)
+            pred_mask = 255*(pred_mask > (PRED_THRESHOLD*255))
+            true_mask = transform.resize(true_mask,
+                                        (OG_ROWS, OG_COLS),
+                                        preserve_range = True)
+            true_mask = (true_mask[:, :, 0] * 255).astype(np.uint8)
 
             # Save predicted masks
             pred_mask_filename = test_img_names[i].replace('og.tif', 'predmask.png')
@@ -299,38 +307,33 @@ def train(learn_rate, loss_func, band_selection, test, val):
             io.imsave('{}{}'.format(predict_dir, compare_filename), compare_im)
 
             # Calculate basic error
-            pred_mask = 255*(pred_mask > (PRED_THRESHOLD*255)) # move this to earlier
             total_res_pixels += np.sum(true_mask == 255)
             total_true_positives += np.sum((true_mask == 255) * (pred_mask == 255))
             total_false_positives += np.sum((true_mask == 0) * (pred_mask == 255))
 
-            i += 1
+        print('Total Res Pixels: {}'.format(total_res_pixels))
+        print('Total True Pos: {} ({})'.format(
+            total_true_positives, total_true_positives/total_res_pixels))
+        print('Total False Pos: {} ({})'.format(
+            total_false_positives, total_false_positives/total_res_pixels))
 
-            print('Total Res Pixels: {}'.format(total_res_pixels))
-            print('Total True Pos: {} ({})'
-                .format(total_true_positives,
-                        total_true_positives/total_res_pixels))
-            print('Total False Pos: {} ({})'
-                .format(total_false_positives,
-                        total_false_positives/total_res_pixels))
+#         # Format test masks for eval
+#         imgs_mask_test = resize_imgs(imgs_mask_test, 1)
+#         imgs_mask_test = imgs_mask_test.astype('float32')
+#         imgs_mask_test /= 255.  # scale masks to [0, 1]
+#         imgs_mask_test[imgs_mask_test >= 0.5] = 1
+#         imgs_mask_test[imgs_mask_test < 0.5] = 0
 
-            # Format test masks for eval
-            imgs_mask_test = resize_imgs(imgs_mask_test, 1)
-            imgs_mask_test = imgs_mask_test.astype('float32')
-            imgs_mask_test /= 255.  # scale masks to [0, 1]
-            imgs_mask_test[imgs_mask_test >= 0.5] = 1
-            imgs_mask_test[imgs_mask_test < 0.5] = 0
-
-            # Test results
-            test_eval = model.evaluate(imgs_test, imgs_mask_test,
-                                    batch_size=12, verbose=0)
-            out_dict['test_f1'] = test_eval[-1]
-            out_dict['test_recall'] = test_eval[-2]
-            out_dict['test_prec'] = test_eval[-3]
-            print('Final Test Scores: {}'.format(test_eval))
+        # Test results
+        test_eval = model.evaluate(imgs_test, imgs_mask_test,
+                                batch_size=12, verbose=0)
+        out_dict['test_f1'] = test_eval[-1]
+        out_dict['test_recall'] = test_eval[-2]
+        out_dict['test_prec'] = test_eval[-3]
+        print('Final Test Scores: {}'.format(test_eval))
 
     return out_dict
 
 if __name__=='__main__':
-    train(6.5E-5, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 14, 15],
-          test=True, val=False)
+    train(6.5E-5, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+          test=True, val=True)

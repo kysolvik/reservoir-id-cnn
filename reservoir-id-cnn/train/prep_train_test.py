@@ -23,7 +23,7 @@ import augment_data as augment
 import glob
 
 # Set random seed for
-random.seed(5787)
+random.seed(5784)
 
 def argparse_init():
     """Prepare ArgumentParser for inputs."""
