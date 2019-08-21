@@ -152,64 +152,73 @@ def resize_imgs(imgs, nbands):
     return imgs_p
 
 
-def train(learn_rate, loss_func, band_selection):
+def preprocess(imgs, masks, band_selection):
+    """Preprocess imgs and masks, returning preprocessed copies"""
+    num_bands = len(band_selection)
+    # Select target bands
+    imgs = imgs[:, :, :, band_selection]
+
+    imgs = resize_imgs(imgs, num_bands)
+    masks = resize_imgs(masks, 1)
+
+    imgs = imgs.astype('float32')
+    masks = masks.astype('float32')
+
+    masks /= 255.  # scale masks to [0, 1]
+    masks[masks >= 0.5] = 1
+    masks[masks < 0.5] = 0
+
+    return imgs, masks
+
+
+def train(learn_rate, loss_func, band_selection, val):
     """Master function for training"""
     print('-'*30)
     print('Loading and preprocessing train data...')
     print('-'*30)
 
-    # Preprocess. Should write a func for this
+    # Prep train
     imgs_train = np.load('./data/prepped/imgs_train.npy')
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
-    imgs_val = np.load('./data/prepped/imgs_val.npy')
-    imgs_mask_val = np.load('./data/prepped/imgs_mask_val.npy')
+    imgs_train, imgs_mask_train = preprocess(imgs_train, imgs_mask_train, band_selection)
 
-    # Select target bands
-    imgs_train = imgs_train[:, :, :, band_selection]
-    imgs_val = imgs_val[:, :, :, band_selection]
-
-    num_bands = len(band_selection)
-
-    imgs_train = resize_imgs(imgs_train, num_bands)
-    imgs_mask_train = resize_imgs(imgs_mask_train, 1)
-    imgs_val = resize_imgs(imgs_val, num_bands)
-    imgs_mask_val = resize_imgs(imgs_mask_val, 1)
-
-    imgs_train = imgs_train.astype('float32')
-    imgs_mask_train = imgs_mask_train.astype('float32')
-    imgs_val = imgs_val.astype('float32')
-    imgs_mask_val = imgs_mask_val.astype('float32')
-
+    # Scale imgs based on train mean and std
     mean = np.mean(imgs_train, axis=(0,1,2))  # mean for data centering
     std = np.std(imgs_train, axis=(0,1,2))  # std for data normalization
-
-    # Save the mean and std values
     np.save('mean_std.npy', np.vstack((mean, std)))
-
     imgs_train -= mean
     imgs_train /= std
+
+    # Prep val
+    if val:
+        val_path = './data/prepped/imgs_val.npy'
+        val_mask_path = './data/prepped/imgs_mask_val.npy'
+    else:
+        # If no val set, test data is used as val/early stopping set
+        val_path = './data/prepped/imgs_test.npy'
+        val_mask_path = './data/prepped/imgs_mask_test.npy'
+
+    # Load val data
+    imgs_val = np.load(val_path)
+    imgs_mask_val = np.load(val_mask_path)
+    imgs_val, imgs_mask_val = preprocess(imgs_val, imgs_mask_val, band_selection)
     imgs_val -= mean
     imgs_val /= std
-
-    imgs_mask_train /= 255.  # scale masks to [0, 1]
-    imgs_mask_train[imgs_mask_train >= 0.5] = 1
-    imgs_mask_train[imgs_mask_train < 0.5] = 0
-    imgs_mask_val /= 255.  # scale masks to [0, 1]
-    imgs_mask_val[imgs_mask_val >= 0.5] = 1
-    imgs_mask_val[imgs_mask_val < 0.5] = 0
+    val_data = (imgs_val, imgs_mask_val)
 
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
+    num_bands = len(band_selection)
     model = get_unet(RESIZE_ROWS, RESIZE_COLS, num_bands, loss_func, learn_rate)
 
     # Setup callbacks
-    model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_f1',
-                                       mode='max', save_best_only=True)
+    model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_loss',
+                                       mode='min', save_best_only=True)
     tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
                               write_images=True)
-    early_stopping = EarlyStopping(monitor='val_f1', min_delta=0, patience=20,
-                                   verbose=0, mode='max')
+    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=25,
+                                   verbose=0, mode='min')
 
 
     print('-'*30)
@@ -217,10 +226,12 @@ def train(learn_rate, loss_func, band_selection):
     print('-'*30)
 
     model.fit(imgs_train, imgs_mask_train, batch_size=12, epochs=500,
-              verbose=2, shuffle=True,
-              validation_data=(imgs_val, imgs_mask_val),
+              verbose=2, shuffle=False,
+              validation_data=val_data,
               callbacks=[model_checkpoint, tensorboard, early_stopping])
 
+    # Record results as dictionary
+    out_dict = {}
 
     print('-'*30)
     print('Loading saved weights for val, testing...')
@@ -228,21 +239,24 @@ def train(learn_rate, loss_func, band_selection):
     model.load_weights('weights.h5')
     val_eval = model.evaluate(imgs_val, imgs_mask_val, batch_size=12, verbose=0)
     print('Final Val Scores: {}'.format(val_eval))
+    # Validation results
+    out_dict['val_f1'] = val_eval[-1]
+    out_dict['val_recall'] = val_eval[-2]
+    out_dict['val_prec'] = val_eval[-3]
 
-
-    print('-'*30)
-    print('Loading and preprocessing test data...')
-    print('-'*30)
-    imgs_test = np.load('./data/prepped/imgs_test.npy')
-    imgs_mask_test = np.load('./data/prepped/imgs_mask_test.npy')
-
-    imgs_test = imgs_test[:, :, :, band_selection]
-
-    imgs_test = resize_imgs(imgs_test, num_bands)
-
-    imgs_test = imgs_test.astype('float32')
-    imgs_test -= mean
-    imgs_test /= std
+    if not val:
+        # Val and test are together, so we'll run tests on val set
+        imgs_test = imgs_val
+        imgs_mask_test = imgs_mask_val
+    else:
+        print('-'*30)
+        print('Loading and preprocessing test data...')
+        print('-'*30)
+        imgs_test = np.load('./data/prepped/imgs_test.npy')
+        imgs_mask_test = np.load('./data/prepped/imgs_mask_test.npy')
+        imgs_test, imgs_mask_test = preprocess(imgs_test, imgs_mask_test, band_selection)
+        imgs_test -= mean
+        imgs_test /= std
 
     print('-'*30)
     print('Predicting masks on test data...')
@@ -256,6 +270,7 @@ def train(learn_rate, loss_func, band_selection):
 
     np.save('{}pred_test_masks.npy'.format(predict_dir), pred_test_masks)
     test_img_names = open('./data/prepped/test_names.csv').read().splitlines()
+
 
     # For calculating total error metrics
     total_res_pixels = 0
@@ -273,10 +288,16 @@ def train(learn_rate, loss_func, band_selection):
         ndwi_img = scale_image_tobyte(ndwi_img)
         ndwi_img = ndwi_img.astype('uint8')
 
+        # Resize masks
         pred_mask = transform.resize(pred_mask,
-                                     (OG_ROWS, OG_COLS),
-                                     preserve_range = True)
-        pred_mask = (pred_mask[:, :, 0] * 255.).astype(np.uint8)
+                                    (OG_ROWS, OG_COLS),
+                                    preserve_range = True)
+        pred_mask = (pred_mask[:, :, 0] * 255).astype(np.uint8)
+        pred_mask = 255*(pred_mask > (PRED_THRESHOLD*255))
+        true_mask = transform.resize(true_mask,
+                                    (OG_ROWS, OG_COLS),
+                                    preserve_range = True)
+        true_mask = (true_mask[:, :, 0] * 255).astype(np.uint8)
 
         # Save predicted masks
         pred_mask_filename = test_img_names[i].replace('og.tif', 'predmask.png')
@@ -291,39 +312,26 @@ def train(learn_rate, loss_func, band_selection):
         io.imsave('{}{}'.format(predict_dir, compare_filename), compare_im)
 
         # Calculate basic error
-        pred_mask = 255*(pred_mask > (PRED_THRESHOLD*255)) # move this to earlier
         total_res_pixels += np.sum(true_mask == 255)
         total_true_positives += np.sum((true_mask == 255) * (pred_mask == 255))
         total_false_positives += np.sum((true_mask == 0) * (pred_mask == 255))
 
-        i += 1
-
     print('Total Res Pixels: {}'.format(total_res_pixels))
-    print('Total True Pos: {} ({})'
-          .format(total_true_positives,
-                  total_true_positives/total_res_pixels))
-    print('Total False Pos: {} ({})'
-          .format(total_false_positives,
-                  total_false_positives/total_res_pixels))
+    print('Total True Pos: {} ({})'.format(
+        total_true_positives, total_true_positives/total_res_pixels))
+    print('Total False Pos: {} ({})'.format(
+        total_false_positives, total_false_positives/total_res_pixels))
 
-    # Record results as dictionary
-    out_dict = {}
-
-    # Validation results
-    out_dict['val_f1'] = val_eval[-1]
-    out_dict['val_recall'] = val_eval[-2]
-    out_dict['val_prec'] = val_eval[-3]
-
-    # Format test masks for eval
-    imgs_mask_test = resize_imgs(imgs_mask_test, 1)
-    imgs_mask_test = imgs_mask_test.astype('float32')
-    imgs_mask_test /= 255.  # scale masks to [0, 1]
-    imgs_mask_test[imgs_mask_test >= 0.5] = 1
-    imgs_mask_test[imgs_mask_test < 0.5] = 0
+#         # Format test masks for eval
+#         imgs_mask_test = resize_imgs(imgs_mask_test, 1)
+#         imgs_mask_test = imgs_mask_test.astype('float32')
+#         imgs_mask_test /= 255.  # scale masks to [0, 1]
+#         imgs_mask_test[imgs_mask_test >= 0.5] = 1
+#         imgs_mask_test[imgs_mask_test < 0.5] = 0
 
     # Test results
     test_eval = model.evaluate(imgs_test, imgs_mask_test,
-                               batch_size=12, verbose=0)
+                                batch_size=12, verbose=0)
     out_dict['test_f1'] = test_eval[-1]
     out_dict['test_recall'] = test_eval[-2]
     out_dict['test_prec'] = test_eval[-3]
@@ -332,4 +340,5 @@ def train(learn_rate, loss_func, band_selection):
     return out_dict
 
 if __name__=='__main__':
-    train(lf.dice_coef_wgt_loss, 7.5E-5)
+    train(6.5E-5, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+          val=False)
