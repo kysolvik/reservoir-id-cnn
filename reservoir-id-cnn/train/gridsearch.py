@@ -16,7 +16,7 @@ import loss_functions as lf
 from collections import OrderedDict
 
 def main():
-    lr_list = [1.0e-4, 7.5e-5, 5e-5]
+    lr_list = [1e-4, 2e-4, 6e-5]
     lf_list = [lf.dice_coef_wgt_loss]
     band_combo_dict = OrderedDict([
 #         ('all',list(range(16))),
@@ -38,7 +38,8 @@ def main():
             out_dict[lf_name][str(lr)] = {}
             for bc_name in sorted(band_combo_dict.keys()):
                 print("STARTING:", bc_name, lf_name, lr)
-                train_results = train.train(lr, lfunc, band_combo_dict[bc_name])
+                train_results = train.train(lr, lfunc, band_combo_dict[bc_name],
+                                            test=True, val=True)
                 out_dict[lf_name][str(lr)][bc_name] = train_results
                 print("DONE:", bc_name, lf_name, lr)
                 print("SO FAR:", out_dict)
