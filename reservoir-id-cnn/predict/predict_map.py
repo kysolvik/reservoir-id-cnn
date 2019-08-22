@@ -15,7 +15,6 @@ import pathlib
 import os
 import argparse
 import numpy as np
-import pandas as pd
 from skimage import io, transform
 import rasterio
 import affine
@@ -32,15 +31,16 @@ RESIZE_ROWS = 512
 RESIZE_COLS = 512
 # Inputs unet size
 
-NBANDS = 4
+NBANDS = 12
 # Number of bands in original image
 
 OVERLAP = 250
 # Overlap size, in pixels.
 
-BATCH_SIZE = 200
+BATCH_SIZE = 500
 # Batch size for process/prediction
 
+BAND_SELECTION = [0, 1, 2, 3, 4, 5, 12, 13, 14, 15]
 
 def argparse_init():
     """Prepare ArgumentParser for inputs"""
@@ -93,7 +93,7 @@ class ResPredictBatch(object):
     """Batch of image tiles for reservoir CNN prediction
 
     Attributes:
-        img_src (rasterio DatasetReader): Rasterio object for reading.
+        img_srcs (List of rasterio DatasetReader): List of rio sources for predict images
         start_indices (array): Nx2 array with row/column indices for starting
             each tile.
         batch_size (int): Number of images for simultaneous prediction.
@@ -104,9 +104,9 @@ class ResPredictBatch(object):
         model (keras model): CNN model with loaded weights.
 
     """
-    def __init__(self, img_src, start_indices, batch_size, dims, nbands,
+    def __init__(self, img_srcs, start_indices, batch_size, dims, nbands,
                  resize_dims, model, mean_std_file, out_dir='./predict/'):
-        self.img_src = img_src
+        self.img_srcs = img_srcs
         self.start_indices = start_indices
         self.batch_size = batch_size
         self.dims = dims
@@ -118,7 +118,7 @@ class ResPredictBatch(object):
 
     @property
     def crs(self):
-        self.img_src.crs
+        self.img_srcs[0].crs
 
 
     def get_geotransform(self, indice_pair):
@@ -132,7 +132,7 @@ class ResPredictBatch(object):
             indice_pair (tuple): Row, Col indices of upper left corner of tile.
 
         """
-        geo = self.img_src.transform
+        geo = self.img_srcs[0].transform
         new_ul = [geo[0] + indice_pair[0]*geo[1] + indice_pair[1]*geo[2],
                   geo[3] + indice_pair[0]*geo[4] + indice_pair[1]*geo[5]]
 
@@ -148,10 +148,15 @@ class ResPredictBatch(object):
                               self.dims[0], self.dims[1]))
         for i in range(self.batch_size):
             row, col = self.start_indices[i,0], self.start_indices[i,1]
-            self.imgs[i] = self.img_src.read(window=((row, row + self.dims[0]),
-                                                     (col, col + self.dims[1])))
+            og_img_list = []
+            for img_src in self.img_srcs:
+                og_img_list += [img_src.read(window=((row, row + self.dims[0]),
+                                                    (col, col + self.dims[1])))]
+            self.imgs[i] = np.dstack(og_img_list)
+
         # Eliminate all null imgs
-        valid_imgs =np.min(self.imgs, axis=(1,2,3)) > 0
+        # IS THIS EVEN ACCURATE?
+        valid_imgs = np.min(self.imgs, axis=(1,2,3)) > 0
         self.imgs = self.imgs[valid_imgs]
         self.start_indices = self.start_indices[valid_imgs]
 
@@ -177,6 +182,12 @@ class ResPredictBatch(object):
     def preprocess(self):
         self.imgs = np.moveaxis(self.imgs, [0, 1, 2, 3], [0, 3, 1, 2])
 
+        # Add Gao NDWI
+        self.add_nd(3, 11)
+
+        # Add McFeeters NDWI band
+        self.add_nd(1, 11)
+
         # Add NDWI band
         self.add_nd(1, 3)
 
@@ -189,6 +200,9 @@ class ResPredictBatch(object):
         std = mean_std_array[1,:]
         self.imgs -= mean
         self.imgs /= std
+
+        # Select target bands
+        self.imgs = self.imgs[:, :, :, BAND_SELECTION]
 
         # Resize and reshape
         new_imgs = np.zeros((self.imgs.shape[0], self.resize_dims[0],
@@ -256,7 +270,7 @@ def prep_batches(source_path, model_structure, model_weights):
     unet_model = models.model_from_json(structure_json)
     unet_model.load_weights(model_weights)
 
-    # Open image
+    # Open primary image
     src = rasterio.open(source_path)
     total_rows, total_cols = src.height, src.width
 
@@ -276,19 +290,27 @@ def prep_batches(source_path, model_structure, model_weights):
     total_batches = np.ceil(start_ind.shape[0]/BATCH_SIZE)
     start_ind_batches = np.array_split(start_ind, total_batches)
 
-    return start_ind_batches, unet_model, src
+    # Open other images and create a list of srcs
+    s2_20m_path = source_path.replace('s2_10m', 's2_20m')
+    s1_10m_path = source_path.replace('s2_10m', 's1_10m')
+    src_list = [
+        src,
+        rasterio.open(s1_10m_path),
+        rasterio.open(s2_20m_path)]
+
+    return start_ind_batches, unet_model, src_list
 
 
-def predict_batches(start_ind_batches, unet_model, img_src, out_dir):
+def predict_batches(start_ind_batches, unet_model, img_srcs, out_dir):
     # Run prediction
     batch_count = 0
     for batch_ind in start_ind_batches:
         res_batch = ResPredictBatch(
-            img_src=img_src, start_indices=batch_ind,
+            img_srcs=img_srcs, start_indices=batch_ind,
             batch_size=batch_ind.shape[0],
             dims=(OG_ROWS, OG_COLS), nbands=NBANDS,
             resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
-            model=unet_model, mean_std_file='../train/mean_std.npy')
+            model=unet_model, mean_std_file='./model_data/v2/mean_std.npy')
         res_batch.predict_write_batch()
 
     return
@@ -300,10 +322,10 @@ def predict_fullmap(source_path, model_structure, model_weights, out_dir):
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
-    start_ind_batches, unet_model, img_src = prep_batches(
+    start_ind_batches, unet_model, img_srcs = prep_batches(
         source_path, model_structure, model_weights)
 
-    predict_batches(start_ind_batches, unet_model, img_src, out_dir)
+    predict_batches(start_ind_batches, unet_model, img_srcs, out_dir)
 
     return
 
