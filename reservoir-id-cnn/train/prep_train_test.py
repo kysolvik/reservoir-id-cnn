@@ -68,7 +68,7 @@ def find_ims_masks(labelbox_json):
 
     # URLS for
     s1_urls = label_df['Labeled Data'].replace(
-        'ndwi.png', 's1_og.tif', regex=True)
+        'ndwi.png', 's1_v2_og.tif', regex=True)
     s2_20m_urls = label_df['Labeled Data'].replace(
         'ndwi.png', 's2_20m_og.tif', regex=True)
 
@@ -142,10 +142,11 @@ def download_ims_mask_pair(og_urls, mask_url, gs_bucket,
             mask_dest_file = og_dest_file.replace('og.tif', 'mask.png')
             name_mask = False
 
-    if mask_url is None:
-        save_empty_mask(mask_dest_file, dim_x, dim_y)
-    else:
-        urllib.request.urlretrieve(mask_url, filename=mask_dest_file)
+#     if mask_url is None:
+#         save_empty_mask(mask_dest_file, dim_x, dim_y)
+#     else:
+#         print(mask_url)
+#         urllib.request.urlretrieve(mask_url, filename=mask_dest_file)
 
     return None
 
