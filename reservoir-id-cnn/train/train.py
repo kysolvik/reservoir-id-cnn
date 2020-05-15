@@ -136,6 +136,13 @@ def get_unet(img_rows, img_cols, nbands, loss_func, learn_rate):
                   loss=loss_func,
                   metrics=[lf.jaccard_coef, lf.dice_coef,
                            precision, recall, f1])
+    # Save structure
+    model_json = model.to_json()
+    print(model_json)
+    with open("unet_10band.txt", 'w') as outfile:
+        outfile.write(model_json)
+
+    print('done')
 
     return model
 
@@ -176,6 +183,9 @@ def train(learn_rate, loss_func, band_selection, val):
     print('-'*30)
     print('Loading and preprocessing train data...')
     print('-'*30)
+
+    num_bands = len(band_selection)
+    model = get_unet(RESIZE_ROWS, RESIZE_COLS, num_bands, loss_func, learn_rate)
 
     # Prep train
     imgs_train = np.load('./data/prepped/imgs_train.npy')
