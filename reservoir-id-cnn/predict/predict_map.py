@@ -15,7 +15,6 @@ import pathlib
 import os
 import argparse
 import numpy as np
-import pandas as pd
 from skimage import io, transform
 import rasterio
 import affine
@@ -23,6 +22,7 @@ from keras import models
 import tempfile
 import subprocess as sp
 import glob
+import re
 
 OG_ROWS = 500
 OG_COLS = 500
@@ -32,15 +32,16 @@ RESIZE_ROWS = 512
 RESIZE_COLS = 512
 # Inputs unet size
 
-NBANDS = 4
+NBANDS = 12
 # Number of bands in original image
 
-OVERLAP = 250
+OVERLAP = 200
 # Overlap size, in pixels.
 
-BATCH_SIZE = 200
+BATCH_SIZE =500
 # Batch size for process/prediction
 
+BAND_SELECTION = [0, 1, 2, 3, 4, 5, 12, 13, 14, 15]
 
 def argparse_init():
     """Prepare ArgumentParser for inputs"""
@@ -93,7 +94,7 @@ class ResPredictBatch(object):
     """Batch of image tiles for reservoir CNN prediction
 
     Attributes:
-        img_src (rasterio DatasetReader): Rasterio object for reading.
+        img_srcs (List of rasterio DatasetReader): List of rio sources for predict images
         start_indices (array): Nx2 array with row/column indices for starting
             each tile.
         batch_size (int): Number of images for simultaneous prediction.
@@ -104,11 +105,12 @@ class ResPredictBatch(object):
         model (keras model): CNN model with loaded weights.
 
     """
-    def __init__(self, img_src, start_indices, batch_size, dims, nbands,
-                 resize_dims, model, mean_std_file, out_dir='./predict/'):
-        self.img_src = img_src
+    def __init__(self, img_srcs, start_indices, batch_size, batch_start_point, dims,
+                 nbands, resize_dims, model, mean_std_file, out_dir='./predict/'):
+        self.img_srcs = img_srcs
         self.start_indices = start_indices
         self.batch_size = batch_size
+        self.batch_start_point = batch_start_point
         self.dims = dims
         self.nbands = nbands
         self.resize_dims = resize_dims
@@ -118,7 +120,7 @@ class ResPredictBatch(object):
 
     @property
     def crs(self):
-        self.img_src.crs
+        self.img_srcs[0].crs
 
 
     def get_geotransform(self, indice_pair):
@@ -132,13 +134,12 @@ class ResPredictBatch(object):
             indice_pair (tuple): Row, Col indices of upper left corner of tile.
 
         """
-        geo = self.img_src.transform
-        new_ul = [geo[0] + indice_pair[0]*geo[1] + indice_pair[1]*geo[2],
-                  geo[3] + indice_pair[0]*geo[4] + indice_pair[1]*geo[5]]
+        geo = self.img_srcs[0].transform
+        new_ul = [geo[2] + indice_pair[0]*geo[0] + indice_pair[1]*geo[1],
+                  geo[5] + indice_pair[0]*geo[3] + indice_pair[1]*geo[4]]
 
-        new_geo = [new_ul[0], geo[1], geo[2], new_ul[1], geo[4], geo[5]]
-        new_affine= affine.Affine.from_gdal(new_ul[0], geo[1], geo[2],
-                                            new_ul[1], geo[4], geo[5])
+        new_affine = affine.Affine(geo[0], geo[1], new_ul[0],
+                                   geo[3], geo[4], new_ul[1])
 
         return new_affine
 
@@ -146,14 +147,41 @@ class ResPredictBatch(object):
     def load_images(self):
         self.imgs = np.empty((self.batch_size, self.nbands,
                               self.dims[0], self.dims[1]))
-        for i in range(self.batch_size):
+        img_count = 0
+        i = self.batch_start_point
+        invalid_list = []
+        valid_list = []
+        while img_count < self.batch_size and i < self.start_indices.shape[0]:
             row, col = self.start_indices[i,0], self.start_indices[i,1]
-            self.imgs[i] = self.img_src.read(window=((row, row + self.dims[0]),
-                                                     (col, col + self.dims[1])))
-        # Eliminate all null imgs
-        valid_imgs =np.min(self.imgs, axis=(1,2,3)) > 0
-        self.imgs = self.imgs[valid_imgs]
-        self.start_indices = self.start_indices[valid_imgs]
+            og_img_list = []
+            # First check if valid against for image
+            img_src = self.img_srcs[0]
+            base_img = img_src.read(window=((row, row + self.dims[0]),
+                                            (col, col + self.dims[1])))
+            if np.min(base_img) > 0:
+                og_img_list += [base_img]
+                for img_src in self.img_srcs[1:]:
+                    og_img_list += [img_src.read(window=((row, row + self.dims[0]),
+                                                        (col, col + self.dims[1])))]
+                self.imgs[img_count] = np.vstack(og_img_list)
+                img_count += 1
+                valid_list += [self.start_indices[i]]
+            else:
+                invalid_list += [self.start_indices[i]]
+            i += 1
+
+        self.batch_end_point = i - 1
+
+        # Save valid indices
+        self.batch_indices = np.asarray(valid_list)
+
+        # Append invalid list to file
+        with open('invalid_indices.txt', 'a') as f:
+            for ind in invalid_list:
+                f.write("{},{}\n".format(ind[0], ind[1]))
+        print('Bypassed {} invalid images'.format(len(invalid_list)))
+        print('Predicting batch of {}'.format(img_count))
+
 
 
     def add_nd(self, band1, band2):
@@ -177,11 +205,20 @@ class ResPredictBatch(object):
     def preprocess(self):
         self.imgs = np.moveaxis(self.imgs, [0, 1, 2, 3], [0, 3, 1, 2])
 
-        # Add NDWI band
+        # Add Gao NDWI
+        self.add_nd(3, 11)
+
+        # Add MNDWI
+        self.add_nd(1, 11)
+
+        # Add McFeeters NDWI band
         self.add_nd(1, 3)
 
         # Add NDVI band
         self.add_nd(3, 2)
+
+        # Select bands
+        self.imgs = self.imgs[:, :, :, BAND_SELECTION]
 
         # Apply scaling
         mean_std_array = np.load(self.mean_std_file)
@@ -203,20 +240,21 @@ class ResPredictBatch(object):
 
 
     def predict(self):
-        self.preds = self.model.predict(self.imgs, 8)
+        self.preds = self.model.predict(self.imgs, 32)
 
 
     def write_images(self):
         for i in range(self.preds.shape[0]):
             outfile = '{}/pred_{}-{}.tif'.format(
-                self.out_dir, self.start_indices[i, 0], self.start_indices[i, 1])
+                self.out_dir, self.batch_indices[i, 0], self.batch_indices[i, 1])
+
             new_dataset = rasterio.open(
                 outfile, 'w', driver='GTiff',
                 height=self.dims[1], width=self.dims[0],
                 count=1, dtype='uint8', compress='lzw',
                 crs=self.crs, nodata=0,
-                transform=self.get_geotransform((self.start_indices[i,1],
-                                                 self.start_indices[i,0]))
+                transform=self.get_geotransform((self.batch_indices[i,1],
+                                                 self.batch_indices[i,0]))
             )
             pred = transform.resize(self.preds[i, :, :, 0],
                                     (self.dims[0], self.dims[1]),
@@ -227,9 +265,9 @@ class ResPredictBatch(object):
 
             # Save NDWI, predicted mask, and actual masks side by side
             compare_filename = '{}/pred_{}-{}_results.png'.format(
-                self.out_dir, self.start_indices[i, 0], self.start_indices[i, 1])
+                self.out_dir, self.batch_indices[i, 0], self.batch_indices[i, 1])
             compare_im = 255 * np.ones((500, 500 * 2 + 10), dtype=np.uint8)
-            ndwi_img = self.imgs[i,:,:,4]
+            ndwi_img = self.imgs[i,:,:,len(BAND_SELECTION)-2]
             ndwi_img = transform.resize(ndwi_img,
                                     (OG_ROWS, OG_COLS),
                                     preserve_range = True)
@@ -247,16 +285,24 @@ class ResPredictBatch(object):
             self.preprocess()
             self.predict()
             self.write_images()
+        return self.batch_end_point
 
 
-def prep_batches(source_path, model_structure, model_weights):
+def get_done_list(out_dir):
+    file_list = glob.glob(os.path.join(out_dir, 'pred_*.tif'))
+    ind_strs = [re.findall(r'[0-9]+', f) for f in file_list]
+    done_indices = np.asarray(ind_strs).astype(int)
+    return done_indices
+
+
+def prep_batches(source_path, model_structure, model_weights, done_ind):
     # Load model
     with open(model_structure, 'r') as struct_file:
         structure_json = struct_file.read()
     unet_model = models.model_from_json(structure_json)
     unet_model.load_weights(model_weights)
 
-    # Open image
+    # Open primary image
     src = rasterio.open(source_path)
     total_rows, total_cols = src.height, src.width
 
@@ -272,26 +318,37 @@ def prep_batches(source_path, model_structure, model_weights):
     # Create Nx2 array with row/col start indices
     start_ind = np.array(np.meshgrid(row_starts, col_starts)).T.reshape(-1, 2)
 
-    # Create batches of BATCH_SIZE
-    total_batches = np.ceil(start_ind.shape[0]/BATCH_SIZE)
-    start_ind_batches = np.array_split(start_ind, total_batches)
+    # Eliminate already predicted indices
+    if done_ind.shape[0]>0:
+        todo_list = np.invert(np.in1d(
+            start_ind.view('int, int'), done_ind.view('int, int')
+        ))
+        start_ind = start_ind[todo_list]
 
-    return start_ind_batches, unet_model, src
+    # Open other images and create a list of srcs
+    s1_10m_path = source_path.replace('s2_10m', 's1_10m')
+    s2_20m_path = source_path.replace('s2_10m', 's2_20m')
+    src_list = [
+        src,
+        rasterio.open(s1_10m_path),
+        rasterio.open(s2_20m_path)]
+
+    return start_ind, unet_model, src_list
 
 
-def predict_batches(start_ind_batches, unet_model, img_src, out_dir):
-    # Run prediction
-    batch_count = 0
-    for batch_ind in start_ind_batches:
-        res_batch = ResPredictBatch(
-            img_src=img_src, start_indices=batch_ind,
-            batch_size=batch_ind.shape[0],
-            dims=(OG_ROWS, OG_COLS), nbands=NBANDS,
-            resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
-            model=unet_model, mean_std_file='../train/mean_std.npy')
-        res_batch.predict_write_batch()
-
-    return
+# def predict_batches(start_ind_batches, unet_model, img_srcs, out_dir):
+#     # Run prediction
+#     batch_count = 0
+#     for batch_ind in start_ind_batches:
+#         res_batch = ResPredictBatch(
+#             img_srcs=img_srcs, start_indices=batch_ind,
+#             batch_size=batch_ind.shape[0],
+#             dims=(OG_ROWS, OG_COLS), nbands=NBANDS,
+#             resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
+#             model=unet_model, mean_std_file='./model_data/v2/mean_std.npy')
+#         res_batch.predict_write_batch()
+#
+#     return
 
 
 def predict_fullmap(source_path, model_structure, model_weights, out_dir):
@@ -300,10 +357,21 @@ def predict_fullmap(source_path, model_structure, model_weights, out_dir):
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
-    start_ind_batches, unet_model, img_src = prep_batches(
-        source_path, model_structure, model_weights)
+    done_indices = get_done_list(out_dir)
 
-    predict_batches(start_ind_batches, unet_model, img_src, out_dir)
+    start_ind, unet_model, img_srcs = prep_batches(
+        source_path, model_structure, model_weights, done_indices)
+
+    batch_start_point = 0
+    while batch_start_point < start_ind.shape[0]:
+        res_batch = ResPredictBatch(
+            img_srcs=img_srcs, start_indices=start_ind,
+            batch_size=BATCH_SIZE, batch_start_point=batch_start_point,
+            dims=(OG_ROWS, OG_COLS), nbands=NBANDS,
+            resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
+            model=unet_model, mean_std_file='./model_data/v2/mean_std.npy')
+        batch_start_point = res_batch.predict_write_batch() + 1
+        print('Dpne with batch, starting new from {}'.format(batch_start_point))
 
     return
 
