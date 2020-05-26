@@ -30,13 +30,22 @@ def spat_join(points_df, poly_df):
 def main():
 
     # Read in points
-    points_df = gpd_read_csv('./data/centers.csv')
+    points_df = gpd_read_csv('./data/centers.csv', 'center_lon', 'center_lat')
     # Read in states polys
     states_df = gpd.read_file('./data/shapefiles/brazil_states.shp')
+    states_df =  states_df[['NOME_UF', 'geometry']].rename(
+            columns={'NOME_UF':'state'})
     states_join = spat_join(points_df, states_df)
+    states_join.drop(columns=['index_right'], inplace=True)
 
     # Read in ecoregions polys
     eco_df = gpd.read_file('./data/shapefiles/ecoregions.shp')
+    eco_df = eco_df[['ECO_NAME', 'BIOME', 'geometry']].rename(
+            columns={'ECO_NAME':'ecoregion', 'BIOME':'biome'})
     all_join = spat_join(states_join, eco_df)
 
-    all_join.to_csv('./data/centers_ecoregions_states.csv')
+    all_join.drop(columns=['geometry']).to_csv(
+            './data/centers_ecoregions_states.csv', index=False)
+
+if __name__=='__main__':
+    main()
