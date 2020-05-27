@@ -19,6 +19,13 @@ state_shape.plot(column='f1', ax=ax, legend=True)
 state_shape.boundary.plot(ax=ax)
 plt.savefig('./figures/state_f1.png')
 
+fig, ax = plt.subplots(1, 1)
+state_shape = state_shape.assign(
+        total_count=state_shape['train_count'] + state_shape['test_count'])
+state_shape.plot(column='total_count', ax=ax, legend=True)
+state_shape.boundary.plot(ax=ax)
+plt.savefig('./figures/state_count.png')
+
 # Ecoregions
 eco_df = pd.read_csv('./data/summary_ecoregion.csv')
 eco_shape = gpd.read_file('./data/shapefiles/ecoregions.shp')
@@ -30,3 +37,11 @@ fig, ax = plt.subplots(1, 1)
 eco_shape.plot(column='f1', ax=ax, legend=True)
 eco_shape.boundary.plot(ax=ax)
 plt.savefig('./figures/eco_f1.png')
+
+
+fig, ax = plt.subplots(1, 1)
+eco_shape = eco_shape.assign(
+        total_count=eco_shape['train_count'] + eco_shape['test_count'])
+eco_shape.plot(column='total_count', ax=ax, legend=True)
+eco_shape.boundary.plot(ax=ax)
+plt.savefig('./figures/eco_count.png')
