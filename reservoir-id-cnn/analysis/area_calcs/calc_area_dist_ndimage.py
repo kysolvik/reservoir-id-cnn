@@ -8,7 +8,7 @@ from scipy import ndimage
 
 tif = sys.argv[1]
 out_txt = sys.argv[2]
-box_size = 10000
+box_size = 0
 
 fh = gdal.Open(tif)
 
@@ -50,7 +50,7 @@ if box_size > 0:
 else:
     ar = fh.GetRasterBand(1).ReadAsArray()
     print('Array read')
-    sizes = get_count(mask)
+    sizes = get_count(ar)
     with open(out_txt, 'w') as f:
         for item in sizes:
             f.write("%s\n" % int(item))
