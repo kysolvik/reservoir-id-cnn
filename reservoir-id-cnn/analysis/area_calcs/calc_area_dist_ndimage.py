@@ -8,7 +8,7 @@ from scipy import ndimage
 
 tif = sys.argv[1]
 out_txt = sys.argv[2]
-box_size = 0
+box_size = 10000
 
 fh = gdal.Open(tif)
 
