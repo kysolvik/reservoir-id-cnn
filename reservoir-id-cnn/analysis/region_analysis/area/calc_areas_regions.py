@@ -36,6 +36,9 @@ col_starts = np.arange(0, total_cols, box_size)
 # Create Nx2 array with row/col start indices
 start_ind = np.array(np.meshgrid(row_starts, col_starts)).T.reshape(-1, 2)
 
+with open(out_txt, 'w') as f:
+    f.write('reg', 'area')
+    j
 for i in range(start_ind.shape[0]):
     # For the indices near edge we need to use a smaller box size
     box_size_rows = min(total_rows - start_ind[i,0], box_size)
@@ -52,4 +55,4 @@ for i in range(start_ind.shape[0]):
         sizes = get_count(ar_cur_reg)
         with open(out_txt, 'a') as f:
             for item in sizes:
-                f.write("{},{}\n".format(int(item), int(reg_num)))
+                f.write("{},{}\n".format(int(reg_num), int(item)))
