@@ -48,7 +48,7 @@ for i in range(start_ind.shape[0]):
         int(box_size_cols),int(box_size_rows))
     for reg_num in np.unique(reg_ar):
         ar_cur_reg = ar.copy() 
-        ar_cur_reg[reg_ar==reg_num] = 0
+        ar_cur_reg[reg_ar!=reg_num] = 0
         sizes = get_count(ar_cur_reg)
         with open(out_txt, 'a') as f:
             for item in sizes:
