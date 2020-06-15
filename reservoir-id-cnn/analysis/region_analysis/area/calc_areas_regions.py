@@ -37,8 +37,7 @@ col_starts = np.arange(0, total_cols, box_size)
 start_ind = np.array(np.meshgrid(row_starts, col_starts)).T.reshape(-1, 2)
 
 with open(out_txt, 'w') as f:
-    f.write('reg', 'area')
-    j
+    f.write('reg,area\n')
 for i in range(start_ind.shape[0]):
     # For the indices near edge we need to use a smaller box size
     box_size_rows = min(total_rows - start_ind[i,0], box_size)
