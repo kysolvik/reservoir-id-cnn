@@ -49,3 +49,24 @@ fig, ax = plt.subplots(1, 1)
 eco_shape.plot(column='nonzero', ax=ax, legend=True)
 eco_shape.boundary.plot(ax=ax)
 plt.savefig('./figures/eco_res_count.png')
+
+# Watersheds
+water_df = pd.read_csv('./data/watersheds_sizes.csv')
+water_df = water_df.assign(nonzero=water_df['area']>0)
+water_df = water_df.groupby('reg').sum()
+water_df['area'] = water_df['area']*0.01
+
+water_shape = gpd.read_file('../accuracy/data/shapefiles/watersheds_4digit.shp')
+
+water_shape['NUNIVOTTO4'] = water_shape['NUNIVOTTO4'].astype(int)
+water_shape = water_shape.merge(water_df, left_on='NUNIVOTTO4', right_on='reg')
+
+fig, ax = plt.subplots(1, 1)
+water_shape.plot(column='area', ax=ax, legend=True)
+water_shape.boundary.plot(ax=ax, linewidth=0.1)
+plt.savefig('./figures/water_res_area.png')
+
+fig, ax = plt.subplots(1, 1)
+water_shape.plot(column='nonzero', ax=ax, legend=True)
+water_shape.boundary.plot(ax=ax, linewidth=0.1)
+plt.savefig('./figures/water_res_count.png')
