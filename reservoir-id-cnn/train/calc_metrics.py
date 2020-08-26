@@ -26,4 +26,18 @@ false_neg = np.sum((pred==0)*(test==255))
 
 precision = true_pos/(true_pos + false_pos)
 recall = true_pos/(true_pos + false_neg)
-print(precision, recall, true_pos, false_pos, true_neg, false_neg)
+pfa = false_pos/(true_pos + false_pos)
+pmd = false_neg/(true_pos + false_neg)
+agree = true_pos + true_neg
+total = (true_pos + false_pos + false_neg + true_neg)
+pcc = (agree)/(total)
+exp_a =  ((((true_pos+false_pos)*(true_pos+false_neg))+
+           ((false_pos+true_neg)*(false_neg+true_neg)))/
+          total
+          )
+kappa = (agree - exp_a)/(total - exp_a)
+f1 = 2*(precision*recall)/(precision+recall)
+iou = true_pos/(true_pos + false_pos + false_neg)
+print(agree, exp_a, kappa)
+print(pfa, pmd, pcc)
+print(precision, recall, f1, iou, true_pos, false_pos, true_neg, false_neg)

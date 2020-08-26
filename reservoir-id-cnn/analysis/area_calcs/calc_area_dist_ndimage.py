@@ -50,7 +50,7 @@ if box_size > 0:
 else:
     ar = fh.GetRasterBand(1).ReadAsArray()
     print('Array read')
-    sizes = get_count(mask)
+    sizes = get_count(ar)
     with open(out_txt, 'w') as f:
         for item in sizes:
             f.write("%s\n" % int(item))
