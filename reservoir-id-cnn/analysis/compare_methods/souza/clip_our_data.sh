@@ -1,0 +1,1 @@
+gdalwarp --config GDAL_CACHEMAX 1000 -wm 1000 -t_srs '+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs' -tr 0.000089831528412 0.000089831528412 -tap -te -61.6477847  -16.2834917 -43.4424373 -2.4520414 -co "COMPRESS=LZW" ~/research/reservoirs/data/predict/v2/full.tif ./data/cnn_souza.tif

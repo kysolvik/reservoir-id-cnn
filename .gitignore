@@ -99,3 +99,10 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# data, figures
+data/
+figures/
+csvs/
+training_images/
+test_metrics.csv

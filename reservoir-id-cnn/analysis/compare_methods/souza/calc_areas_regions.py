@@ -16,7 +16,7 @@ region_fh = gdal.Open(region_tif)
 
 
 def get_count(ar):
-    mask = ar == 255
+    mask = ar > 0
     # Get count
     label_im, nb_labels = ndimage.label(mask,
                                     structure = [[1,1,1],[1,1,1],[1,1,1]])
@@ -42,18 +42,18 @@ for i in range(start_ind.shape[0]):
     # For the indices near edge we need to use a smaller box size
     box_size_rows = min(total_rows - start_ind[i,0], box_size)
     box_size_cols = min(total_cols - start_ind[i,1], box_size)
-    ar = fh.GetRasterBand(1).ReadAsArray(
-        int(start_ind[i, 1]), int(start_ind[i,0]),
-        int(box_size_cols),int(box_size_rows))
     reg_ar = region_fh.GetRasterBand(1).ReadAsArray(
         int(start_ind[i, 1]), int(start_ind[i,0]),
         int(box_size_cols),int(box_size_rows))
-    for reg_num in np.unique(reg_ar):
-        if reg_num==0:
-            continue
-        ar_cur_reg = ar.copy() 
-        ar_cur_reg[reg_ar!=reg_num] = 0
-        sizes = get_count(ar_cur_reg)
-        with open(out_txt, 'a') as f:
-            for item in sizes:
-                f.write("{},{}\n".format(int(reg_num), int(item)))
+    if np.max(reg_ar)>0:
+        ar = fh.GetRasterBand(1).ReadAsArray(
+            int(start_ind[i, 1]), int(start_ind[i,0]),
+            int(box_size_cols),int(box_size_rows))
+        for reg_num in np.unique(reg_ar):
+            if reg_num!=0:
+                ar_cur_reg = ar.copy() 
+                ar_cur_reg[reg_ar!=reg_num] = 0
+                sizes = get_count(ar_cur_reg)
+                with open(out_txt, 'a') as f:
+                    for item in sizes:
+                        f.write("{},{}\n".format(int(reg_num), int(item)))
