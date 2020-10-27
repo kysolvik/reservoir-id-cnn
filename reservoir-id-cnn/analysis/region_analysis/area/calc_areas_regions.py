@@ -49,6 +49,8 @@ for i in range(start_ind.shape[0]):
         int(start_ind[i, 1]), int(start_ind[i,0]),
         int(box_size_cols),int(box_size_rows))
     for reg_num in np.unique(reg_ar):
+        if reg_num==0:
+            continue
         ar_cur_reg = ar.copy() 
         ar_cur_reg[reg_ar!=reg_num] = 0
         sizes = get_count(ar_cur_reg)
