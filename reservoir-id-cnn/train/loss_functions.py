@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 from keras import backend as K
+from keras.losses import binary_crossentropy
+
 
 SMOOTH = 1.
 # Smoothing factor for dice and jaccard coefficients
@@ -69,3 +71,15 @@ def dice_coef_loss(y_true, y_pred):
 def dice_coef_wgt_loss(y_true, y_pred):
     """Loss function is simply dice coefficient * -1"""
     return -dice_coef_wgt(y_true, y_pred)
+
+def cross_entropy_loss(y_true, y_pred):
+    return binary_crossentropy(y_true, y_pred)
+
+
+def cross_entropy_wgt_loss(y_true, y_pred):
+    one_weight = 0.95
+    zero_weight = 0.05
+    weights = y_true * one_weight + (1. - y_true) * zero_weight
+    bce = binary_crossentropy(y_true, y_pred)
+    weighted_bce = K.mean(K.flatten(bce) * K.flatten(weights))
+    return weighted_bce
