@@ -23,7 +23,7 @@ import augment_data as augment
 import glob
 
 # Set random seed for
-random.seed(5781)
+random.seed(5371) # old was 5781, then 5371
 
 def argparse_init():
     """Prepare ArgumentParser for inputs."""
@@ -101,7 +101,7 @@ def normalized_diff(ar1, ar2):
     ar1 = ar1.astype('float32')
     ar2 = ar2.astype('float32')
 
-    return((ar1 - ar2) / (ar1 + ar2))
+    return np.nan_to_num(((ar1 - ar2) / (ar1 + ar2)),0)
 
 
 def add_nd(imgs, band1, band2):
@@ -142,11 +142,11 @@ def download_ims_mask_pair(og_urls, mask_url, gs_bucket,
             mask_dest_file = og_dest_file.replace('og.tif', 'mask.png')
             name_mask = False
 
-#     if mask_url is None:
-#         save_empty_mask(mask_dest_file, dim_x, dim_y)
-#     else:
-#         print(mask_url)
-#         urllib.request.urlretrieve(mask_url, filename=mask_dest_file)
+    if mask_url is None:
+        save_empty_mask(mask_dest_file, dim_x, dim_y)
+    else:
+        print(mask_url)
+        urllib.request.urlretrieve(mask_url, filename=mask_dest_file)
 
     return None
 
@@ -237,7 +237,9 @@ def write_prepped_data(data_path, img_dict, mask_dict, name_dict):
     return
 
 
-def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
+def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
+                           img_dim_x = 640, img_dim_y=640,
+                           nbands=12, data_path='./data/',
                            test_frac=0.2, val_frac=0.2):
     """Save training and test data into easy .npy file"""
     flip_names = [line.rstrip('\n') for line in open('flip_names.txt')]
@@ -249,8 +251,8 @@ def create_train_test_data(dim_x=500, dim_y=500, nbands=12, data_path='./data/',
 
     total_ims = len(mask_images)
 
-    imgs = np.ndarray((total_ims, dim_x, dim_y, nbands), dtype=np.uint16)
-    imgs_mask = np.ndarray((total_ims, dim_x, dim_y), dtype=np.uint8)
+    imgs = np.ndarray((total_ims, img_dim_x, img_dim_y, nbands), dtype=np.uint16)
+    imgs_mask = np.ndarray((total_ims, mask_dim_x, mask_dim_y), dtype=np.uint8)
 
     i = 0
     print('-'*30)
