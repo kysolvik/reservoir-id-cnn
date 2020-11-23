@@ -42,7 +42,7 @@ def rotatedRectWithMaxArea(w, h, angle):
 
 
 
-def random_aug(img, mask, resize_range=(0.75, 1.0)):
+def random_aug(img, mask, resize_range=(0.6, 0.95)):
     """Perform a random assortment of augmentationso to an img-mask pair."""
     # Save datatypes to convert back to later
     img_dtype = img.dtype
@@ -61,17 +61,17 @@ def random_aug(img, mask, resize_range=(0.75, 1.0)):
 #     # Crop and resize
     img_og_size = img.shape[0]
     mask_og_size = mask.shape[0]
-#     pad_size = int((img_og_size-mask_og_size)/2)
-#     crop_ratio = random.uniform(resize_range[0], resize_range[1])
-#     mask_crop_size = int(np.round(mask_og_size * crop_ratio))
-#     mask_crop_row = random.randint(0, mask_og_size - mask_crop_size)
-#     mask_crop_col = random.randint(0, mask_og_size - mask_crop_size)
-#     mask = mask[mask_crop_row:(mask_crop_row+mask_crop_size),
-#             mask_crop_col:(mask_crop_col+mask_crop_size)]
-#     img_crop_size = int(np.round(img_og_size * crop_ratio))
-#     img_crop_row = int(np.round(mask_crop_row+pad_size*(1-crop_ratio)))
-#     img_crop_col = int(np.round(mask_crop_col+pad_size*(1-crop_ratio)))
-#     img = img[img_crop_row:(img_crop_row+img_crop_size), img_crop_col:(img_crop_col+img_crop_size)]
+    pad_size = int((img_og_size-mask_og_size)/2)
+    crop_ratio = random.uniform(resize_range[0], resize_range[1])
+    mask_crop_size = int(np.round(mask_og_size * crop_ratio))
+    mask_crop_row = random.randint(0, mask_og_size - mask_crop_size)
+    mask_crop_col = random.randint(0, mask_og_size - mask_crop_size)
+    mask = mask[mask_crop_row:(mask_crop_row+mask_crop_size),
+            mask_crop_col:(mask_crop_col+mask_crop_size)]
+    img_crop_size = int(np.round(img_og_size * crop_ratio))
+    img_crop_row = int(np.round(mask_crop_row+pad_size*(1-crop_ratio)))
+    img_crop_col = int(np.round(mask_crop_col+pad_size*(1-crop_ratio)))
+    img = img[img_crop_row:(img_crop_row+img_crop_size), img_crop_col:(img_crop_col+img_crop_size)]
 
     # Rotate
     rotate_degrees = random.randint(0,359)
