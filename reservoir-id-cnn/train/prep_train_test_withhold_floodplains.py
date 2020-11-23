@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bjn/env python3
 # -*- coding: utf-8 -*-
 """Prepare images and masks for training and testing
 
@@ -159,7 +159,8 @@ def pad_mask(img_mask):
     return img_mask_padded
 
 
-def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac):
+def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac,
+                     withhold_list=[]):
     """Split data into train, test, val (or just train)
 
     Returns:
@@ -169,6 +170,20 @@ def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac):
     name_dict = {}
     img_dict = {}
     mask_dict = {}
+
+    # Convert name list to array
+    img_names = np.array(img_names)
+    print(img_names.shape)
+
+    # Pull out data we're withholding, we'll add back in to train
+    wh_indices = np.where(np.in1d(img_names, withhold_list))[0]
+    print(wh_indices.shape)
+    if wh_indices.shape[0] > 0:
+        wh_imgs, imgs = imgs[wh_indices], np.delete(imgs, wh_indices, axis=0)
+        wh_mask, imgs_mask = imgs_mask[wh_indices], np.delete(imgs_mask, wh_indices, axis=0)
+        wh_names, img_names = img_names[wh_indices], np.delete(img_names, wh_indices, axis=0)
+    print(wh_imgs.shape)
+    print(imgs.shape)
 
     total_ims = imgs.shape[0]
     if test_frac != 0:
@@ -182,18 +197,30 @@ def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac):
 
         img_dict['train'] = imgs[train_indices]
         mask_dict['train'] = imgs_mask[train_indices]
-        name_dict['train'] = [img_names[i] for i in train_indices]
+        name_dict['train'] = img_names[train_indices]
+
+        # Insert withheld back into train
+        if wh_indices.shape[0] > 0:
+            print(mask_dict['train'].shape)
+            print(img_dict['train'].shape)
+            print(name_dict['train'].shape)
+            img_dict['train'] = np.concatenate([img_dict['train'], wh_imgs])
+            mask_dict['train'] = np.concatenate([mask_dict['train'], wh_mask])
+            name_dict['train'] = np.concatenate([name_dict['train'], wh_names])
+            print(mask_dict['train'].shape)
+            print(img_dict['train'].shape)
+            print(name_dict['train'].shape)
 
         img_dict['test'] = imgs[test_indices]
         mask_dict['test'] = imgs_mask[test_indices]
-        name_dict['test'] = [img_names[i] for i in test_indices]
+        name_dict['test'] = img_names[test_indices]
 
         if val_frac != 0:
             val_indices = np.delete(np.array(range(total_ims)),
                                     np.append(train_indices, test_indices))
             img_dict['val'] = imgs[val_indices]
             mask_dict['val'] = imgs_mask[val_indices]
-            name_dict['val'] = [img_names[i] for i in val_indices]
+            name_dict['val'] = img_names[val_indices]
 
     else:
         img_dict['train'] = imgs
@@ -247,7 +274,6 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
 
     # Get mask image names and base image patterns
     mask_images = glob.glob('{}*mask.png'.format(data_path))
-    mask_images.sort()
     image_patterns = [mi.replace('mask.png', '') for mi in mask_images]
 
     total_ims = len(mask_images)
@@ -307,9 +333,14 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
     # Add NDVI band
     imgs = add_nd(imgs, 3, 2)
 
+    # Find filenames containing "floodplains"
+    wh_word = 'floodplains'
+    withhold_list = [fn for fn in og_img_names if wh_word in fn]
+
     # Split into training, test, val
     img_dict, mask_dict, name_dict = split_train_test(
-        imgs, imgs_mask, og_img_names, test_frac, val_frac)
+        imgs, imgs_mask, og_img_names, test_frac, val_frac,
+        withhold_list=withhold_list)
 
     # Augment training data
     img_dict['train'], mask_dict['train'] = augment_all_training(

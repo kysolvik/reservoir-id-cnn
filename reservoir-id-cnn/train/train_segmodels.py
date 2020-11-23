@@ -22,6 +22,10 @@ from skimage import io
 import loss_functions as lf
 import math
 from keras.callbacks import LearningRateScheduler
+from segmentation_models import Unet
+from segmentation_models import get_preprocessing
+from segmentation_models.losses import bce_jaccard_loss, DiceLoss
+from segmentation_models.metrics import iou_score, f1_score
 
 # Seed value
 # Apparently you may use different seed values at each stage
@@ -36,7 +40,6 @@ import random
 random.seed(seed_value)
 
 # 3. Set the `numpy` pseudo-random generator at a fixed value
-import numpy as np
 np.random.seed(seed_value)
 
 # 4. Set the `tensorflow` pseudo-random generator at a fixed value
@@ -51,16 +54,9 @@ sess = tf.Session(graph=tf.get_default_graph(), config=session_conf)
 from keras import backend as K
 K.set_session(sess)
 
-# learning rate schedule
-def step_decay(epoch):
-    initial_lrate = 0.1
-    drop = 0.5
-    epochs_drop = 10.0
-    lrate = initial_lrate * math.pow(drop, math.floor((1+epoch)/epochs_drop))
-    return lrate
-
-
-K.set_image_data_format('channels_last')  # TF dimension ordering in this code
+BACKBONE = 'resnet34'
+loss = DiceLoss(class_weights=np.array([1,2]))
+preprocess_input = get_preprocessing(BACKBONE)
 
 BATCH_SIZE=12
 # Set batch szie
@@ -124,89 +120,17 @@ def f1(y_true, y_pred):
     return 2*((prec*rec)/(prec+rec+K.epsilon()))
 
 
-def get_unet(img_rows, img_cols, nbands, loss_func, learn_rate, crop=0):
-    """U-Net Structure
 
-    @author: jocicmarko
-    @url: https://github.com/jocicmarko/ultrasound-nerve-segmentation
-    """
-
-    inputs = Input((img_rows, img_cols, nbands))
-    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
-    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
-    pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
-
-    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(pool1)
-    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv2)
-    pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
-
-    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same')(pool2)
-    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv3)
-    pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
-
-    conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(pool3)
-    conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv4)
-    pool4 = MaxPooling2D(pool_size=(2, 2))(conv4)
-
-    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(pool4)
-    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(conv5)
-
-    up6 = concatenate([Conv2DTranspose(256, (2, 2), strides=(2, 2),
-                                       padding='same')(conv5), conv4], axis=3)
-    conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(up6)
-    conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv6)
-
-    up7 = concatenate([Conv2DTranspose(128, (2, 2), strides=(2, 2),
-                                       padding='same')(conv6), conv3], axis=3)
-    conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(up7)
-    conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv7)
-
-    up8 = concatenate([Conv2DTranspose(64, (2, 2), strides=(2, 2),
-                                       padding='same')(conv7), conv2], axis=3)
-    conv8 = Conv2D(64, (3, 3), activation='relu', padding='same')(up8)
-    conv8 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv8)
-
-    up9 = concatenate([Conv2DTranspose(32, (2, 2), strides=(2, 2),
-                                       padding='same')(conv8), conv1], axis=3)
-    conv9 = Conv2D(32, (3, 3), activation='relu', padding='same')(up9)
-    conv9 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv9)
-
-    conv10 = Conv2D(1, (1, 1), activation='sigmoid')(conv9)
-
-    crop10 = Cropping2D(cropping=(crop, crop))(conv10)
-
-    model = Model(inputs=[inputs], outputs=[crop10])
-
-#     lr_schedule = ExponentialDecay(
-#             learn_rate,
-#             decay_steps=10,
-#             decay_rate=0.8,
-#             staircase=True)
-
-    model.compile(optimizer=Adam(lr=learn_rate, decay=1E-4),
-                  loss=loss_func,
-                  metrics=[lf.jaccard_coef, lf.dice_coef,
-                           precision, recall, f1])
-    # Save structure
-    model_json = model.to_json()
-    with open("unet_10band.txt", 'w') as outfile:
-        outfile.write(model_json)
-
-    print(model.summary())
-
-    return model
-
-
-# def resize_imgs(imgs, nbands):
-#     """Resize numpy array of images"""
-#     imgs_p = np.ndarray((imgs.shape[0], RESIZE_ROWS, RESIZE_COLS, nbands))
+def resize_imgs(imgs, nbands):
+    """Resize numpy array of images"""
+    imgs_p = np.ndarray((imgs.shape[0], RESIZE_ROWS, RESIZE_COLS, nbands))
 #
-#     for i in range(imgs.shape[0]):
-#         imgs_p[i] = transform.resize(imgs[i],
-#                                      (RESIZE_ROWS, RESIZE_COLS, nbands),
-#                                      preserve_range = True)
+    for i in range(imgs.shape[0]):
+        imgs_p[i] = transform.resize(imgs[i],
+                                     (RESIZE_ROWS, RESIZE_COLS, nbands),
+                                     preserve_range = True)
 #
-#     return imgs_p
+    return imgs_p
 
 
 def preprocess(imgs, masks, band_selection, mask_crop=0):
@@ -232,7 +156,7 @@ def preprocess(imgs, masks, band_selection, mask_crop=0):
     return imgs, masks
 
 
-def train(learn_rate, loss_func, band_selection, val):
+def train(learn_rate, loss_func, band_selection, val, epochs=200):
     """Master function for training"""
     print('-'*30)
     print('Loading and preprocessing train data...')
@@ -278,27 +202,47 @@ def train(learn_rate, loss_func, band_selection, val):
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
-    num_bands = len(band_selection)
-    model = get_unet(TIF_ROWS, TIF_COLS, num_bands, loss_func, learn_rate,
-                     crop=CROP_SIZE)
+    print(imgs_train.max(), np.mean(imgs_train))
+    imgs_train = preprocess_input(imgs_train)
+    imgs_val = preprocess_input(imgs_val)
+    print(imgs_train.max(), np.mean(imgs_train))
 
-    # Setup callbacks
+    num_bands = len(band_selection)
+
+    base_model = Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
+    output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
+    model = Model(base_model.inputs, output, name=base_model.name)
+    print(model.summary())
+    optimizer = Adam(lr=learn_rate, decay=2E-3)
+    model.compile(optimizer, loss=loss, metrics=[iou_score, f1_score, f1])
+
     model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_loss',
-                                       mode='min', save_best_only=True)
-    tensorboard = TensorBoard(log_dir='./logs', histogram_freq=0,
-                              write_images=False)
+                                       mode='min', save_best_only=VAL)
     early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=25,
                                    verbose=0, mode='min')
+    model.fit(
+            x=imgs_train,
+            y=imgs_mask_train,
+            batch_size=BATCH_SIZE,
+            epochs=epochs,
+            validation_data=(imgs_val, imgs_mask_val),
+            verbose=2,0
+            callbacks=[model_checkpoint, early_stopping],
+        shuffle=True
+
+    )
+
+    # Setup callbacks
 
 
     print('-'*30)
     print('Fitting model...')
     print('-'*30)
-
-    model.fit(imgs_train, imgs_mask_train, batch_size=BATCH_SIZE, epochs=500,
-              verbose=2, shuffle=True,
-             validation_data=val_data,
-              callbacks=[model_checkpoint, tensorboard, early_stopping])
+#
+#     model.fit(imgs_train, imgs_mask_train, batch_size=BATCH_SIZE, epochs=500,
+#               verbose=2, shuffle=True,
+#              validation_data=val_data,
+#               callbacks=[model_checkpoint, tensorboard, early_stopping])
 
     # Record results as dictionary
     out_dict = {}
@@ -326,6 +270,7 @@ def train(learn_rate, loss_func, band_selection, val):
         imgs_mask_test = np.load('./data/prepped/imgs_mask_test.npy')
         imgs_test, imgs_mask_test = preprocess(imgs_test, imgs_mask_test,
                                                band_selection, mask_crop=0)
+#         imgs_test = imgs_test[:,70:570, 70:570,:]
         imgs_test -= mean
         imgs_test /= std
 
@@ -411,5 +356,5 @@ def train(learn_rate, loss_func, band_selection, val):
     return out_dict
 
 if __name__=='__main__':
-    train(7.5E-5, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4,5, 12, 13, 14, 15],
-          val=VAL)
+    train(5E-4, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+          val=VAL, epochs=200)

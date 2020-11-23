@@ -24,18 +24,19 @@ import subprocess as sp
 import glob
 import re
 
-OG_ROWS = 500
-OG_COLS = 500
+OG_ROWS = 640
+OG_COLS = 640
 # Dimensions of input images.
 
-RESIZE_ROWS = 512
-RESIZE_COLS = 512
-# Inputs unet size
+RESIZE_FLAG = False
+RESIZE_ROWS = 640
+RESIZE_COLS = 640
+# If needed, can resize before feeding to CNN
 
 NBANDS = 12
 # Number of bands in original image
 
-OVERLAP = 200
+OVERLAP = 70
 # Overlap size, in pixels.
 
 BATCH_SIZE =500
@@ -100,19 +101,22 @@ class ResPredictBatch(object):
         batch_size (int): Number of images for simultaneous prediction.
         dims (tuple): Dimensions of image (dim_x, dim_y).
         nbands (int): Number of bands in image
+        resize_flag (bool): True to run resizing on inputs, False to not
         resize_dims (tuple): Dimensions for resizing before CNN prediction.
         out_dir (str): Path to output directory.
         model (keras model): CNN model with loaded weights.
 
     """
     def __init__(self, img_srcs, start_indices, batch_size, batch_start_point, dims,
-                 nbands, resize_dims, model, mean_std_file, out_dir='./predict/'):
+                 nbands, resize_flag, resize_dims, model, mean_std_file,
+                 out_dir='./predict/'):
         self.img_srcs = img_srcs
         self.start_indices = start_indices
         self.batch_size = batch_size
         self.batch_start_point = batch_start_point
         self.dims = dims
         self.nbands = nbands
+        self.resize_flag = resize_flag
         self.resize_dims = resize_dims
         self.out_dir = out_dir
         self.mean_std_file = mean_std_file
@@ -227,16 +231,17 @@ class ResPredictBatch(object):
         self.imgs -= mean
         self.imgs /= std
 
+        if self.resize_flag:
         # Resize and reshape
-        new_imgs = np.zeros((self.imgs.shape[0], self.resize_dims[0],
-                            self.resize_dims[1], self.imgs.shape[3]))
+            new_imgs = np.zeros((self.imgs.shape[0], self.resize_dims[0],
+                                self.resize_dims[1], self.imgs.shape[3]))
 
-        for i in range(self.imgs.shape[0]):
-            new_imgs[i] = transform.resize(self.imgs[i],
-                                            (self.resize_dims[0], self.resize_dims[1],
-                                             self.imgs.shape[3]),
-                                            preserve_range=True)
-        self.imgs = new_imgs
+            for i in range(self.imgs.shape[0]):
+                new_imgs[i] = transform.resize(self.imgs[i],
+                                                (self.resize_dims[0], self.resize_dims[1],
+                                                self.imgs.shape[3]),
+                                                preserve_range=True)
+            self.imgs = new_imgs
 
 
     def predict(self):
@@ -256,9 +261,12 @@ class ResPredictBatch(object):
                 transform=self.get_geotransform((self.batch_indices[i,1],
                                                  self.batch_indices[i,0]))
             )
-            pred = transform.resize(self.preds[i, :, :, 0],
-                                    (self.dims[0], self.dims[1]),
-                                    preserve_range=True)
+            if self.resize_flag:
+                pred = transform.resize(self.preds[i, :, :, 0],
+                                        (self.dims[0], self.dims[1]),
+                                        preserve_range=True)
+            else:
+                pred = self.pred
             pred[pred >= 0.5] = 255
             pred[pred < 0.5] = 0
             new_dataset.write(pred.astype('uint8'), 1)
@@ -268,9 +276,10 @@ class ResPredictBatch(object):
                 self.out_dir, self.batch_indices[i, 0], self.batch_indices[i, 1])
             compare_im = 255 * np.ones((500, 500 * 2 + 10), dtype=np.uint8)
             ndwi_img = self.imgs[i,:,:,len(BAND_SELECTION)-2]
-            ndwi_img = transform.resize(ndwi_img,
-                                    (OG_ROWS, OG_COLS),
-                                    preserve_range = True)
+            if self.resize_flag:
+                ndwi_img = transform.resize(ndwi_img,
+                                        (OG_ROWS, OG_COLS),
+                                        preserve_range = True)
             ndwi_img = scale_image_tobyte(ndwi_img)
             ndwi_img = ndwi_img.astype('uint8')
             compare_im[0:500, 0:500] = ndwi_img
@@ -367,7 +376,7 @@ def predict_fullmap(source_path, model_structure, model_weights, out_dir):
         res_batch = ResPredictBatch(
             img_srcs=img_srcs, start_indices=start_ind,
             batch_size=BATCH_SIZE, batch_start_point=batch_start_point,
-            dims=(OG_ROWS, OG_COLS), nbands=NBANDS,
+            dims=(OG_ROWS, OG_COLS), nbands=NBANDS,resize=FLAG,
             resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
             model=unet_model, mean_std_file='./model_data/v2/mean_std.npy')
         batch_start_point = res_batch.predict_write_batch() + 1
