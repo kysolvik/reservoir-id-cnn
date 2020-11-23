@@ -10,6 +10,8 @@ import gdal
 import glob
 import math
 
+OUT_SIZE = 640
+OUT_PAD = int(OUT_SIZE/2)
 def argparse_init():
     """Prepare ArgumentParser for inputs"""
 
@@ -39,8 +41,8 @@ def subset_target(target_vrt, vrt_x_min, vrt_y_max, target_res, output_file, cen
     y_center_round = vrt_y_max + math.floor((y_center - vrt_y_max)
                                             / target_res) * target_res
 
-    xmin, xmax = x_center_round - 250*target_res, x_center_round + 250*target_res
-    ymin, ymax = y_center_round - 250*target_res, y_center_round + 250*target_res
+    xmin, xmax = x_center_round - OUT_PAD*target_res, x_center_round + OUT_PAD*target_res
+    ymin, ymax = y_center_round - OUT_PAD*target_res, y_center_round + OUT_PAD*target_res
 
 
 
