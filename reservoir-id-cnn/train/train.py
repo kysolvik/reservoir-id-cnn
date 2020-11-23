@@ -25,7 +25,7 @@ from keras.callbacks import LearningRateScheduler
 
 # Seed value
 # Apparently you may use different seed values at each stage
-seed_value= 581
+seed_value= 583
 
 # 1. Set the `PYTHONHASHSEED` environment variable at a fixed value
 import os
@@ -183,7 +183,7 @@ def get_unet(img_rows, img_cols, nbands, loss_func, learn_rate, crop=0):
 #             decay_rate=0.8,
 #             staircase=True)
 
-    model.compile(optimizer=Adam(lr=learn_rate, decay=5E-4),
+    model.compile(optimizer=Adam(lr=learn_rate, decay=1E-4),
                   loss=loss_func,
                   metrics=[lf.jaccard_coef, lf.dice_coef,
                            precision, recall, f1])
@@ -411,5 +411,5 @@ def train(learn_rate, loss_func, band_selection, val):
     return out_dict
 
 if __name__=='__main__':
-    train(6.5E-5, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 12, 13, 14, 15],
+    train(7.5E-5, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4,5, 12, 13, 14, 15],
           val=VAL)
