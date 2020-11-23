@@ -23,7 +23,7 @@ import augment_data as augment
 import glob
 
 # Set random seed for
-random.seed(5371) # old was 5781, then 5371
+random.seed(5781) # old was 5781, then 5371
 
 def argparse_init():
     """Prepare ArgumentParser for inputs."""
@@ -247,6 +247,7 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
 
     # Get mask image names and base image patterns
     mask_images = glob.glob('{}*mask.png'.format(data_path))
+    mask_images.sort()
     image_patterns = [mi.replace('mask.png', '') for mi in mask_images]
 
     total_ims = len(mask_images)
