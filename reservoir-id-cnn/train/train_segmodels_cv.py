@@ -234,6 +234,7 @@ def train(learn_rate, loss_func, band_selection, epochs=50,
         cvscores['precision'].append(scores[3]*100)
         cvscores['recall'].append(scores[4]*100)
 
+        tf.keras.backend.clear_session()
         i+=1
 
         break
