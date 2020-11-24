@@ -12,27 +12,28 @@ Notes:
 
 
 import os
+import math
 from skimage import transform
 import numpy as np
+import tensorflow as tf
 from keras.models import Model
-from keras.layers import Input, concatenate, Conv2D, MaxPooling2D, Conv2DTranspose, UpSampling2D, Cropping2D
-from keras.optimizers import Adam, SGD
-from keras.callbacks import ModelCheckpoint, TensorBoard, EarlyStopping
+from keras.layers import Cropping2D
+from keras.optimizers import Adam
+from keras.callbacks import ModelCheckpoint, EarlyStopping
 from skimage import io
 import loss_functions as lf
-import math
-from keras.callbacks import LearningRateScheduler
+from tensorflow.keras.optimizers.schedules import ExponentialDecay
 from segmentation_models import Unet
 from segmentation_models import get_preprocessing
-from segmentation_models.losses import bce_jaccard_loss, DiceLoss
+from segmentation_models.losses import DiceLoss
 from segmentation_models.metrics import iou_score, f1_score
+import keras.backend as K
 
 # Seed value
 # Apparently you may use different seed values at each stage
 seed_value= 583
 
 # 1. Set the `PYTHONHASHSEED` environment variable at a fixed value
-import os
 os.environ['PYTHONHASHSEED']=str(seed_value)
 
 # 2. Set the `python` built-in pseudo-random generator at a fixed value
@@ -43,16 +44,14 @@ random.seed(seed_value)
 np.random.seed(seed_value)
 
 # 4. Set the `tensorflow` pseudo-random generator at a fixed value
-import tensorflow as tf
-tf.set_random_seed(seed_value)
-# for later versions:
-# tf.compat.v1.set_random_seed(seed_value)
+tf.random.set_seed(seed_value)
 
 # 5. Configure a new global `tensorflow` session
-session_conf = tf.ConfigProto(intra_op_parallelism_threads=1, inter_op_parallelism_threads=1)
-sess = tf.Session(graph=tf.get_default_graph(), config=session_conf)
-from keras import backend as K
-K.set_session(sess)
+session_conf = tf.compat.v1.ConfigProto(intra_op_parallelism_threads=1,
+    inter_op_parallelism_threads=1)
+sess = tf.compat.v1.Session(graph=tf.compat.v1.get_default_graph(),
+    config=session_conf)
+tf.compat.v1.keras.backend.set_session(sess)
 
 BACKBONE = 'resnet34'
 loss = DiceLoss(class_weights=np.array([1,2]))
@@ -74,6 +73,10 @@ PRED_THRESHOLD = 0.5
 VAL = True
 # Includes separate validation set (separate from test)
 
+def get_lr_metric(optimizer):
+    def lr(y_true, y_pred):
+        return optimizer.lr
+    return lr
 
 def scale_image_tobyte(ar):
     """Scale larger data type array to byte"""
@@ -118,19 +121,6 @@ def f1(y_true, y_pred):
     prec = precision(y_true, y_pred)
     rec = recall(y_true, y_pred)
     return 2*((prec*rec)/(prec+rec+K.epsilon()))
-
-
-
-def resize_imgs(imgs, nbands):
-    """Resize numpy array of images"""
-    imgs_p = np.ndarray((imgs.shape[0], RESIZE_ROWS, RESIZE_COLS, nbands))
-#
-    for i in range(imgs.shape[0]):
-        imgs_p[i] = transform.resize(imgs[i],
-                                     (RESIZE_ROWS, RESIZE_COLS, nbands),
-                                     preserve_range = True)
-#
-    return imgs_p
 
 
 def preprocess(imgs, masks, band_selection, mask_crop=0):
@@ -213,20 +203,31 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
     model = Model(base_model.inputs, output, name=base_model.name)
     print(model.summary())
-    optimizer = Adam(lr=learn_rate, decay=2E-3)
-    model.compile(optimizer, loss=loss, metrics=[iou_score, f1_score, f1])
+    lr_decay_steps = math.ceiling(imgs_train.shape/BATCH_SIZE)
+    lr_schedule = ExponentialDecay(
+            learn_rate,
+            decay_steps=lr_decay_steps,
+            decay_rate=0.95,
+            staircase=True)
+    optimizer = Adam(lr=lr_schedule)
+
+    lr_metric = get_lr_metric(optimizer)
+
+    model.compile(optimizer, loss=loss, metrics=[iou_score, f1_score,
+                                                 f1, lr_metric])
 
     model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_loss',
                                        mode='min', save_best_only=VAL)
     early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=25,
                                    verbose=0, mode='min')
+
     model.fit(
             x=imgs_train,
             y=imgs_mask_train,
             batch_size=BATCH_SIZE,
             epochs=epochs,
             validation_data=(imgs_val, imgs_mask_val),
-            verbose=2,0
+            verbose=2,
             callbacks=[model_checkpoint, early_stopping],
         shuffle=True
 
