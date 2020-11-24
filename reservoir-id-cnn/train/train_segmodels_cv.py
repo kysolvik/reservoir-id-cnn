@@ -19,7 +19,6 @@ import skimage
 from tensorflow.keras.layers import Cropping2D
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint
-import loss_functions as lf
 # from tensorflow.keras.optimizers.schedules import ExponentialDecay
 from sklearn.model_selection import KFold
 import zca_whiten as zca
@@ -87,8 +86,7 @@ def preprocess(imgs, masks, mask_crop=0):
     return imgs, masks
 
 
-def prep_and_split_kfold(band_selection, train, test,
-                         zca_whiten=False, gauss_noise=False):
+def prep_and_split_kfold(band_selection, train, test, withhold_fp=False):
 
     # Prep train
     imgs_train = np.load('./data/prepped/imgs_train.npy'
@@ -96,21 +94,40 @@ def prep_and_split_kfold(band_selection, train, test,
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
     imgs_train, imgs_mask_train = preprocess(imgs_train, imgs_mask_train,
                                              mask_crop=0)
-    # Remove floodplains
-    imgs_train_fp, imgs_train = imgs_train[-51:], imgs_train[:-51]
-    imgs_mask_train_fp, imgs_mask_train = imgs_mask_train[-51:], imgs_mask_train[:-51]
 
     # Separate aug and non-aug
     num_train = int(imgs_train.shape[0]/2)
     imgs_mask_train_aug, imgs_mask_train = imgs_mask_train[num_train:], imgs_mask_train[:num_train]
     imgs_train_aug, imgs_train = imgs_train[num_train:], imgs_train[:num_train]
-    x_train = np.vstack([imgs_train[train], imgs_train_aug[train],
-                         imgs_train_fp])
-    y_train = np.vstack([imgs_mask_train[train], imgs_mask_train_aug[train],
-                         imgs_mask_train_fp])
+
+    # Remove floodplains
+    if withhold_fp:
+        imgs_train_fp, imgs_train = imgs_train[-51:], imgs_train[:-51]
+        imgs_mask_train_fp, imgs_mask_train = imgs_mask_train[-51:], imgs_mask_train[:-51]
+        imgs_train_aug_fp, imgs_train_aug = imgs_train_aug[-51:], imgs_train_aug[:-51]
+        imgs_mask_train_aug_fp, imgs_mask_train_aug = imgs_mask_train_aug[-51:], imgs_mask_train_aug[:-51]
+        print(imgs_train_fp.shape)
+        print(imgs_train_aug_fp.shape)
+
+    # Stack into train sets
+    x_train = np.vstack([imgs_train[train], imgs_train_aug[train]])
+    y_train = np.vstack([imgs_mask_train[train], imgs_mask_train_aug[train]])
+
+    # Add fp if they were withheld
+    if withhold_fp:
+        x_train = np.vstack([x_train, imgs_train_fp, imgs_train_aug_fp])
+        y_train = np.vstack([y_train, imgs_mask_train_fp, imgs_mask_train_aug_fp])
+
+    # Create test sets
     x_test = imgs_train[test]
     y_test = imgs_mask_train[test]
 
+    return (x_train.astype('float32'), y_train.astype('float32'),
+            x_test.astype('float32'), y_test.astype('float32'))
+
+
+def final_augs(x_train, y_train, x_test, y_test,
+               zca_whiten=False, gauss_noise=False):
     # Scale imgs based on train mean and std
     mean = np.mean(x_train, axis=(0, 1, 2))  # mean for data centering
     std = np.std(x_train, axis=(0, 1, 2))  # std for data normalization
@@ -145,8 +162,9 @@ def prep_and_split_kfold(band_selection, train, test,
             x_test.astype('float32'), y_test.astype('float32'))
 
 
+
 def train(learn_rate, loss_func, band_selection, epochs=50,
-          zca_whiten=False, gauss_noise=False, withold_fp=True):
+          zca_whiten=False, gauss_noise=False, withhold_fp=False):
     """Master function for training"""
     print('-'*30)
     print('Loading and preprocessing train data...')
@@ -155,7 +173,9 @@ def train(learn_rate, loss_func, band_selection, epochs=50,
     num_bands = len(band_selection)
 
     # Prep K-fold cross-val
-    num_imgs = (np.load('./data/prepped/imgs_mask_train.npy').shape[0]-(2*51))/2
+    num_imgs = np.load('./data/prepped/imgs_mask_train.npy').shape[0]/2
+    if withhold_fp:
+        num_imgs -= 51
     kfold = KFold(n_splits=5, shuffle=True, random_state=seed_value)
 
     i=0
@@ -171,9 +191,13 @@ def train(learn_rate, loss_func, band_selection, epochs=50,
         print('-'*30)
         num_bands = len(band_selection)
 
+        # perform split and final augmentations/scaling
         x_train, y_train, x_test, y_test = prep_and_split_kfold(
-            band_selection, train, test,
+            band_selection, train, test, withhold_fp=True)
+        x_train, y_train, x_test, y_test = final_augs(
+            x_train, y_train, x_test, y_test,
             zca_whiten=zca_whiten, gauss_noise=gauss_noise)
+        print(x_train.dtype, y_train.dtype, x_test.dtype, y_test.dtype)
 
         base_model = sm.Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
         output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
@@ -216,5 +240,6 @@ def train(learn_rate, loss_func, band_selection, epochs=50,
 
 
 if __name__=='__main__':
-    train(1E-4, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
-          epochs=60, zca_whiten=True, gauss_noise=False)
+    train(1E-4, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+          epochs=60, withhold_fp=True,
+          zca_whiten=True, gauss_noise=False)
