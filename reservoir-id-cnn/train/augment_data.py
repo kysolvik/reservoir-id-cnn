@@ -6,6 +6,7 @@ import numpy as np
 import math
 import random as random
 from skimage import transform
+import skimage
 
 def rotatedRectWithMaxArea(w, h, angle):
     """
@@ -42,11 +43,14 @@ def rotatedRectWithMaxArea(w, h, angle):
 
 
 
-def random_aug(img, mask, resize_range=(0.6, 0.95)):
+def random_aug(img, mask, resize_range=(0.6, 0.95), noise=False):
     """Perform a random assortment of augmentationso to an img-mask pair."""
-    # Save datatypes to convert back to later
+    # Save datatypes and range to convert back to later
     img_dtype = img.dtype
     mask_dtype = mask.dtype
+    img_bandranges = np.ptp(img, axis=(0, 1))
+    img_bandmins = np.amin(img, axis=(0,1))
+    img = 2.*(img - img_bandmins)/img_bandranges-1
 
     # Flip
     flip_v = random.randint(0, 1)
@@ -88,7 +92,13 @@ def random_aug(img, mask, resize_range=(0.6, 0.95)):
     mask = transform.resize(mask, (mask_og_size, mask_og_size),
             preserve_range=True)
 
-    # Convert back to original datatypes
+    # Gaussian noise
+    if noise:
+        img = skimage.util.random_noise(img, mode='gaussian', var=0.01,
+                                        clip=True)
+
+    # Convert back to original range datatypes
+    img = img_bandranges*(img + 1)/2 + img_bandmins
     img = img.astype(img_dtype)
     mask = mask.astype(mask_dtype)
 
