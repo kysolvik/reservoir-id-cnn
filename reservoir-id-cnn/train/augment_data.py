@@ -48,9 +48,6 @@ def random_aug(img, mask, resize_range=(0.6, 0.95), noise=False):
     # Save datatypes and range to convert back to later
     img_dtype = img.dtype
     mask_dtype = mask.dtype
-    img_bandranges = np.ptp(img, axis=(0, 1))
-    img_bandmins = np.amin(img, axis=(0,1))
-    img = 2.*(img - img_bandmins)/img_bandranges-1
 
     # Flip
     flip_v = random.randint(0, 1)
@@ -94,11 +91,14 @@ def random_aug(img, mask, resize_range=(0.6, 0.95), noise=False):
 
     # Gaussian noise
     if noise:
+        img_bandranges = np.ptp(img, axis=(0, 1))
+        img_bandmins = np.amin(img, axis=(0,1))
+        img = 2.*(img - img_bandmins)/img_bandranges-1
         img = skimage.util.random_noise(img, mode='gaussian', var=0.01,
                                         clip=True)
+        img = img_bandranges*(img + 1)/2 + img_bandmins
 
-    # Convert back to original range datatypes
-    img = img_bandranges*(img + 1)/2 + img_bandmins
+    # Convert back to original datatypes
     img = img.astype(img_dtype)
     mask = mask.astype(mask_dtype)
 
