@@ -10,7 +10,6 @@ Notes:
 
 """
 
-
 import os
 import numpy as np
 import tensorflow as tf
@@ -27,7 +26,8 @@ sm.set_framework('tf.keras')
 
 # Seed value
 # Apparently you may use different seed values at each stage
-seed_value = 584
+seed_value = 583
+print(seed_value)
 
 # 1. Set the `PYTHONHASHSEED` environment variable at a fixed value
 os.environ['PYTHONHASHSEED']=str(seed_value)
@@ -163,7 +163,7 @@ def final_augs(x_train, y_train, x_test, y_test,
 
 
 
-def train(learn_rate, loss_func, band_selection, epochs=50,
+def train(learn_rate, band_selection, epochs=50,
           zca_whiten=False, gauss_noise=False, withhold_fp=False):
     """Master function for training"""
     print('-'*30)
@@ -193,7 +193,7 @@ def train(learn_rate, loss_func, band_selection, epochs=50,
 
         # perform split and final augmentations/scaling
         x_train, y_train, x_test, y_test = prep_and_split_kfold(
-            band_selection, train, test, withhold_fp=True)
+            band_selection, train, test, withhold_fp=withhold_fp)
         x_train, y_train, x_test, y_test = final_augs(
             x_train, y_train, x_test, y_test,
             zca_whiten=zca_whiten, gauss_noise=gauss_noise)
@@ -204,7 +204,7 @@ def train(learn_rate, loss_func, band_selection, epochs=50,
         model = Model(base_model.inputs, output, name=base_model.name)
         print(model.summary())
 
-        optimizer = Adam(learning_rate=learn_rate, decay=5E-4)
+        optimizer = Adam(learning_rate=learn_rate, decay=1E-3)
 
         model.compile(optimizer, loss=loss, metrics=[
             sm.metrics.iou_score, sm.metrics.precision, sm.metrics.recall,
@@ -228,19 +228,21 @@ def train(learn_rate, loss_func, band_selection, epochs=50,
                 shuffle=True
         )
 
-        scores = model.evaluate(x_test, y_test, verbose=0)
+        scores = model.evaluate(x_test, y_test, verbose=1)
+        print(scores)
         cvscores['iou'].append(scores[1]*100)
-        cvscores['f1'].append(scores[2]*100)
-        cvscores['precision'].append(scores[3]*100)
-        cvscores['recall'].append(scores[4]*100)
+        cvscores['precision'].append(scores[2]*100)
+        cvscores['recall'].append(scores[3]*100)
+        cvscores['f1'].append(scores[4]*100)
 
         tf.keras.backend.clear_session()
         i+=1
 
         break
+    print(cvscores)
 
 
 if __name__=='__main__':
     train(1E-4, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
-          epochs=60, withhold_fp=True,
-          zca_whiten=True, gauss_noise=False)
+          epochs=60, withhold_fp=False,
+          zca_whiten=False, gauss_noise=False)
