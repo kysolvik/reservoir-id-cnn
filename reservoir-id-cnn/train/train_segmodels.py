@@ -12,22 +12,17 @@ Notes:
 
 
 import os
-import math
-from skimage import transform
 import numpy as np
 import tensorflow as tf
-from keras.models import Model
-from keras.layers import Cropping2D
-from keras.optimizers import Adam
-from keras.callbacks import ModelCheckpoint, EarlyStopping
-from skimage import io
-import loss_functions as lf
-from tensorflow.keras.optimizers.schedules import ExponentialDecay
-from segmentation_models import Unet
-from segmentation_models import get_preprocessing
-from segmentation_models.losses import DiceLoss
-from segmentation_models.metrics import iou_score, f1_score
-import keras.backend as K
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Cropping2D
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
+# from tensorflow.keras.optimizers.schedules import ExponentialDecay
+from sklearn.model_selection import KFold
+from skimage import io, transform
+import segmentation_models as sm
+sm.set_framework('tf.keras')
 
 # Seed value
 # Apparently you may use different seed values at each stage
@@ -54,8 +49,8 @@ sess = tf.compat.v1.Session(graph=tf.compat.v1.get_default_graph(),
 tf.compat.v1.keras.backend.set_session(sess)
 
 BACKBONE = 'resnet34'
-loss = DiceLoss(class_weights=np.array([1,2]))
-preprocess_input = get_preprocessing(BACKBONE)
+loss = sm.losses.DiceLoss(class_weights=np.array([1,2]))
+preprocess_input = sm.get_preprocessing(BACKBONE)
 
 BATCH_SIZE=12
 # Set batch szie
@@ -89,40 +84,6 @@ def scale_image_tobyte(ar):
     return(byte_ar)
 
 
-def recall(y_true, y_pred):
-    """Recall metric.
-
-    Only computes a batch-wise average of recall.
-
-    Computes the recall, a metric for multi-label classification of
-    how many relevant items are selected.
-    """
-    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
-    possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
-    recall = true_positives / (possible_positives + K.epsilon())
-    return recall
-
-
-def precision(y_true, y_pred):
-    """Precision metric.
-
-    Only computes a batch-wise average of precision.
-
-    Computes the precision, a metric for multi-label classification of
-    how many selected items are relevant.
-    """
-    true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
-    predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
-    precision = true_positives / (predicted_positives + K.epsilon())
-    return precision
-
-
-def f1(y_true, y_pred):
-    prec = precision(y_true, y_pred)
-    rec = recall(y_true, y_pred)
-    return 2*((prec*rec)/(prec+rec+K.epsilon()))
-
-
 def preprocess(imgs, masks, band_selection, mask_crop=0):
     """Preprocess imgs and masks, returning preprocessed copies"""
     num_bands = len(band_selection)
@@ -146,7 +107,7 @@ def preprocess(imgs, masks, band_selection, mask_crop=0):
     return imgs, masks
 
 
-def train(learn_rate, loss_func, band_selection, val, epochs=200):
+def train(learn_rate, band_selection, val, epochs=200):
     """Master function for training"""
     print('-'*30)
     print('Loading and preprocessing train data...')
@@ -161,8 +122,8 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
                                              band_selection, mask_crop=0)
 
     # Scale imgs based on train mean and std
-    mean = np.mean(imgs_train, axis=(0,1,2))  # mean for data centering
-    std = np.std(imgs_train, axis=(0,1,2))  # std for data normalization
+    mean = np.mean(imgs_train, axis=(0,1,2), dtype='float64', keepdims=True)
+    std = np.std(imgs_train, axis=(0,1,2), dtype='float64', keepdims=True)
     np.save('mean_std.npy', np.vstack((mean, std)))
     imgs_train -= mean
     imgs_train /= std
@@ -199,27 +160,21 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 
     num_bands = len(band_selection)
 
-    base_model = Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
+    base_model = sm.Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
     output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
     model = Model(base_model.inputs, output, name=base_model.name)
     print(model.summary())
-    lr_decay_steps = math.ceiling(imgs_train.shape/BATCH_SIZE)
-    lr_schedule = ExponentialDecay(
-            learn_rate,
-            decay_steps=lr_decay_steps,
-            decay_rate=0.95,
-            staircase=True)
-    optimizer = Adam(lr=lr_schedule)
+    optimizer = Adam(learning_rate=learn_rate, decay=2E-3)
 
-    lr_metric = get_lr_metric(optimizer)
 
-    model.compile(optimizer, loss=loss, metrics=[iou_score, f1_score,
-                                                 f1, lr_metric])
+    model.compile(optimizer, loss=loss, metrics=[
+        sm.metrics.iou_score, sm.metrics.precision, sm.metrics.recall,
+        sm.metrics.f1_score])
 
-    model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_loss',
-                                       mode='min', save_best_only=VAL)
-    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=25,
-                                   verbose=0, mode='min')
+    model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_iou_score',
+                                       mode='max', save_best_only=VAL)
+    early_stopping = EarlyStopping(monitor='val_iou_score', min_delta=0, patience=25,
+                                   verbose=0, mode='max')
 
     model.fit(
             x=imgs_train,
@@ -229,21 +184,9 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
             validation_data=(imgs_val, imgs_mask_val),
             verbose=2,
             callbacks=[model_checkpoint, early_stopping],
-        shuffle=True
-
+            shuffle=True
     )
 
-    # Setup callbacks
-
-
-    print('-'*30)
-    print('Fitting model...')
-    print('-'*30)
-#
-#     model.fit(imgs_train, imgs_mask_train, batch_size=BATCH_SIZE, epochs=500,
-#               verbose=2, shuffle=True,
-#              validation_data=val_data,
-#               callbacks=[model_checkpoint, tensorboard, early_stopping])
 
     # Record results as dictionary
     out_dict = {}
@@ -271,7 +214,6 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
         imgs_mask_test = np.load('./data/prepped/imgs_mask_test.npy')
         imgs_test, imgs_mask_test = preprocess(imgs_test, imgs_mask_test,
                                                band_selection, mask_crop=0)
-#         imgs_test = imgs_test[:,70:570, 70:570,:]
         imgs_test -= mean
         imgs_test /= std
 
@@ -357,5 +299,5 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     return out_dict
 
 if __name__=='__main__':
-    train(5E-4, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+    train(4E-4, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
           val=VAL, epochs=200)
