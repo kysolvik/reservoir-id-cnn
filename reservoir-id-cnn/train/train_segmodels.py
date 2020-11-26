@@ -18,11 +18,12 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Cropping2D
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
-# from tensorflow.keras.optimizers.schedules import ExponentialDecay
+from tensorflow.keras.optimizers.schedules import ExponentialDecay
 from sklearn.model_selection import KFold
 from skimage import io, transform
 import segmentation_models as sm
 sm.set_framework('tf.keras')
+# sm.set_framework('keras')
 
 # Seed value
 # Apparently you may use different seed values at each stage
@@ -48,11 +49,11 @@ sess = tf.compat.v1.Session(graph=tf.compat.v1.get_default_graph(),
     config=session_conf)
 tf.compat.v1.keras.backend.set_session(sess)
 
-BACKBONE = 'resnet34'
-loss = sm.losses.DiceLoss(class_weights=np.array([1,2]))
+BACKBONE = 'resnet50'
+loss = sm.losses.DiceLoss()
 preprocess_input = sm.get_preprocessing(BACKBONE)
 
-BATCH_SIZE=12
+BATCH_SIZE=10
 # Set batch szie
 OG_ROWS = 500
 OG_COLS = 500
@@ -144,12 +145,14 @@ def train(learn_rate, band_selection, val, epochs=200):
                                          mask_crop=0)
     imgs_val -= mean
     imgs_val /= std
-    val_data = (imgs_val, imgs_mask_val)
 
-    print(imgs_val.shape)
+    print('-'*30)
+    print('Data ready...')
+    print('-'*30)
     print(imgs_train.shape)
-    print(imgs_mask_val.shape)
     print(imgs_mask_train.shape)
+    print(imgs_val.shape)
+    print(imgs_mask_val.shape)
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
@@ -163,9 +166,10 @@ def train(learn_rate, band_selection, val, epochs=200):
     base_model = sm.Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
     output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
     model = Model(base_model.inputs, output, name=base_model.name)
-    print(model.summary())
-    optimizer = Adam(learning_rate=learn_rate, decay=2E-3)
 
+    print(model.summary())
+
+    optimizer = Adam(learning_rate=learn_rate, decay=3E-3)
 
     model.compile(optimizer, loss=loss, metrics=[
         sm.metrics.iou_score, sm.metrics.precision, sm.metrics.recall,
@@ -173,7 +177,7 @@ def train(learn_rate, band_selection, val, epochs=200):
 
     model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_iou_score',
                                        mode='max', save_best_only=VAL)
-    early_stopping = EarlyStopping(monitor='val_iou_score', min_delta=0, patience=25,
+    early_stopping = EarlyStopping(monitor='val_iou_score', min_delta=0, patience=10,
                                    verbose=0, mode='max')
 
     model.fit(
@@ -299,5 +303,6 @@ def train(learn_rate, band_selection, val, epochs=200):
     return out_dict
 
 if __name__=='__main__':
-    train(4E-4, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
-          val=VAL, epochs=200)
+    train(1E-4, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+#     train(1E-3, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+           val=VAL, epochs=200)
