@@ -15,10 +15,11 @@ import os
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Cropping2D
+from tensorflow.keras.layers import Cropping2D, GaussianNoise, Input
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.optimizers.schedules import ExponentialDecay
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from sklearn.model_selection import KFold
 from skimage import io, transform
 import segmentation_models as sm
@@ -53,7 +54,7 @@ BACKBONE = 'resnet50'
 loss = sm.losses.DiceLoss()
 preprocess_input = sm.get_preprocessing(BACKBONE)
 
-BATCH_SIZE=10
+BATCH_SIZE=8
 # Set batch szie
 OG_ROWS = 500
 OG_COLS = 500
@@ -68,6 +69,12 @@ PRED_THRESHOLD = 0.5
 # Prediction threshold. > PRED_THRESHOLD will be classified as res.
 VAL = True
 # Includes separate validation set (separate from test)
+NOISE = False
+# Add gaussian noise to inputs
+AUGMENT = False
+# Data augmentation
+REGULARIZE = False
+# Add regularization
 
 def get_lr_metric(optimizer):
     def lr(y_true, y_pred):
@@ -108,7 +115,8 @@ def preprocess(imgs, masks, band_selection, mask_crop=0):
     return imgs, masks
 
 
-def train(learn_rate, band_selection, val, epochs=200):
+def train(learn_rate, band_selection, val, epochs=200, noise=False,
+          aug=False, regularize=False):
     """Master function for training"""
     print('-'*30)
     print('Loading and preprocessing train data...')
@@ -146,6 +154,13 @@ def train(learn_rate, band_selection, val, epochs=200):
     imgs_val -= mean
     imgs_val /= std
 
+    print(imgs_train.shape)
+    imgs_train = preprocess_input(imgs_train)
+    imgs_val = preprocess_input(imgs_val)
+    print(imgs_train.shape)
+
+
+
     print('-'*30)
     print('Data ready...')
     print('-'*30)
@@ -156,20 +171,29 @@ def train(learn_rate, band_selection, val, epochs=200):
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
-    print(imgs_train.max(), np.mean(imgs_train))
-    imgs_train = preprocess_input(imgs_train)
-    imgs_val = preprocess_input(imgs_val)
-    print(imgs_train.max(), np.mean(imgs_train))
 
     num_bands = len(band_selection)
 
-    base_model = sm.Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
-    output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
-    model = Model(base_model.inputs, output, name=base_model.name)
+    if noise:
+        base_model = sm.Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
+        inp = Input(shape=(None,None,num_bands))
+        glayer = GaussianNoise(0.025, input_shape = (None, None, num_bands))(inp)
+        gauss_out = base_model(glayer)
+        output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(gauss_out)
+        model = Model(inp, output, name=base_model.name)
+    else:
+        base_model = sm.Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
+        output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
+        model = Model(base_model.inputs, output, name=base_model.name)
 
-    print(model.summary())
 
-    optimizer = Adam(learning_rate=learn_rate, decay=3E-3)
+    optimizer = Adam(learning_rate=learn_rate) #, decay=1E-3)
+
+    l2 = tf.keras.regularizers.l2(1e-4)
+    for layer in model.layers:
+        if isinstance(layer, tf.keras.layers.Conv2D):
+            model.add_loss(lambda layer=layer: l2(layer.kernel))
+
 
     model.compile(optimizer, loss=loss, metrics=[
         sm.metrics.iou_score, sm.metrics.precision, sm.metrics.recall,
@@ -177,20 +201,43 @@ def train(learn_rate, band_selection, val, epochs=200):
 
     model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_iou_score',
                                        mode='max', save_best_only=VAL)
-    early_stopping = EarlyStopping(monitor='val_iou_score', min_delta=0, patience=10,
+    early_stopping = EarlyStopping(monitor='val_iou_score', min_delta=0, patience=25,
                                    verbose=0, mode='max')
 
-    model.fit(
-            x=imgs_train,
-            y=imgs_mask_train,
-            batch_size=BATCH_SIZE,
-            epochs=epochs,
-            validation_data=(imgs_val, imgs_mask_val),
-            verbose=2,
-            callbacks=[model_checkpoint, early_stopping],
-            shuffle=True
-    )
+    if aug:
+        datagen = ImageDataGenerator(
+            zca_whitening=False,
+            rotation_range=90,
+            width_shift_range=0.2,
+            height_shift_range=0.2,
+            fill_mode='nearest',
+            shear_range=20,
+            zoom_range=0.2,
+            horizontal_flip=True,
+            vertical_flip=True)
+        datagen.fit(imgs_train)
+        model.fit(datagen.flow(imgs_train, imgs_mask_train,
+                               batch_size=BATCH_SIZE),
+                  steps_per_epoch = len(imgs_train)/BATCH_SIZE,
+                  epochs=epochs,
+                  validation_data=(imgs_val, imgs_mask_val),
+                  verbose=2,
+                  callbacks=[model_checkpoint, early_stopping],
+                  shuffle=True
+        )
 
+
+    else:
+        model.fit(
+                x=imgs_train,
+                y=imgs_mask_train,
+                batch_size=BATCH_SIZE,
+                epochs=epochs,
+                validation_data=(imgs_val, imgs_mask_val),
+                verbose=2,
+                callbacks=[model_checkpoint, early_stopping],
+                shuffle=True
+        )
 
     # Record results as dictionary
     out_dict = {}
@@ -303,6 +350,7 @@ def train(learn_rate, band_selection, val, epochs=200):
     return out_dict
 
 if __name__=='__main__':
-    train(1E-4, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+    train(2E-4, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
 #     train(1E-3, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
-           val=VAL, epochs=200)
+           val=VAL, epochs=200, noise=NOISE, aug=AUGMENT,
+          regularize=REGULARIZE)
