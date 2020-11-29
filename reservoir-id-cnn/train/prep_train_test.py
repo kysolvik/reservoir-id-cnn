@@ -23,7 +23,7 @@ import augment_data as augment
 import glob
 
 # Set random seed for
-random.seed(5781) # old was 5781, then 5371
+random.seed(5373) # old was 5781, then 5371
 
 def argparse_init():
     """Prepare ArgumentParser for inputs."""
@@ -48,6 +48,10 @@ def argparse_init():
                    action='store_true')
     p.add_argument('--wh-floodplains',
                    help='Withhold floodplains for train only',
+                   default=False,
+                   action='store_true')
+    p.add_argument('--augment',
+                   help='Include flag to augment train data',
                    default=False,
                    action='store_true')
     return p
@@ -97,13 +101,17 @@ def save_empty_mask(mask_path, dim_x, dim_y):
 
     return None
 
+def rescale_minmax_uint16(ar):
+    ar = ar.astype('float64')
+    return (65535*(ar - ar.min())/(ar.max()-ar.min())).astype(np.uint16)
+
 
 def normalized_diff(ar1, ar2):
     """Returns normalized difference of two arrays."""
 
-    # Convert arrays to float32
-    ar1 = ar1.astype('float32')
-    ar2 = ar2.astype('float32')
+    # Convert arrays to float64 (for calculation only)
+    ar1 = ar1.astype('float64')
+    ar2 = ar2.astype('float64')
 
     return np.nan_to_num(((ar1 - ar2) / (ar1 + ar2)),0)
 
@@ -114,10 +122,7 @@ def add_nd(imgs, band1, band2):
     nd = normalized_diff(imgs[:,:,:,band1], imgs[:,:,:,band2])
 
     # Convert to uint16
-    nd_min = nd.min()
-    nd_max = nd.max()
-    nd = 65535 * (nd - nd_min) / (nd_max - nd_min)
-    nd = nd.astype(np.uint16)
+    nd = rescale_minmax_uint16(nd)
 
     # Reshape
     nd = np.reshape(nd, np.append(np.asarray(nd.shape), 1))
@@ -181,6 +186,7 @@ def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac,
 
     # Pull out data we're withholding, we'll add back in to train
     wh_indices = np.where(np.in1d(img_names, withhold_list))[0]
+    print('Withholding: {}', wh_indices.shape)
     if wh_indices.shape[0] > 0:
         wh_imgs, imgs = imgs[wh_indices], np.delete(imgs, wh_indices, axis=0)
         wh_mask, imgs_mask = imgs_mask[wh_indices], np.delete(imgs_mask, wh_indices, axis=0)
@@ -263,7 +269,8 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
                            img_dim_x = 640, img_dim_y=640,
                            nbands=12, data_path='./data/',
                            test_frac=0.2, val_frac=0.2,
-                           withhold_floodplains=False):
+                           withhold_floodplains=False,
+                           augment_flag=False):
     """Save training and test data into easy .npy file"""
     flip_names = [line.rstrip('\n') for line in open('flip_names.txt')]
 
@@ -321,6 +328,10 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
 
     print('Loading done.')
 
+    # Rescale all bands so they're the same
+    for i in range(imgs.shape[-1]):
+        imgs[:, :, :, i] = rescale_minmax_uint16(imgs[:, :, :, i])
+
     # Add  Gao NDWI
     imgs = add_nd(imgs, 3, 11)
     # Add  MNDWI
@@ -329,6 +340,7 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
     imgs = add_nd(imgs, 1, 3)
     # Add NDVI band
     imgs = add_nd(imgs, 3, 2)
+
 
     # Find filenames containing "floodplains"
     if withhold_floodplains:
@@ -343,8 +355,12 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
         withhold_list=withhold_list)
 
     # Augment training data
-    img_dict['train'], mask_dict['train'] = augment_all_training(
-        img_dict['train'], mask_dict['train'])
+    if augment_flag:
+        img_dict['train'], mask_dict['train'] = augment_all_training(
+            img_dict['train'], mask_dict['train'])
+
+    print(imgs.shape)
+    print(img_dict['train'].shape)
 
     # Write images
     write_prepped_data(data_path, img_dict, mask_dict, name_dict)
@@ -375,7 +391,8 @@ def main():
         val_frac = 0
 
     create_train_test_data(val_frac=val_frac, test_frac=test_frac,
-                           withhold_floodplains=args.wh_floodplains)
+                           withhold_floodplains=args.wh_floodplains,
+                           augment_flag=args.augment)
 
     return
 
