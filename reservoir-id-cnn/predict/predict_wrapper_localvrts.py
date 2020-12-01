@@ -13,8 +13,8 @@ import predict_map
 def predict_wrapper():
 
     predict_map.predict_fullmap('/mnt/disks/pred_data/vrts/s2_10m.vrt',
-                                './model_data/v2/unet_structure.txt',
-                                './model_data/v2/weights.h5',
+                                './model_data/v3/unet_segmodels_10band.txt',
+                                './model_data/v3/weights.h5',
                                 '/mnt/disks/pred_data/out/')
     return
 
