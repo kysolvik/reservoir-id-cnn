@@ -239,11 +239,8 @@ class ResPredictBatch(object):
         mean_std_array = np.load(self.mean_std_file)
         mean = np.array(mean_std_array[0])
         std = np.array(mean_std_array[1])
-        print(mean)
-        print(self.imgs[:,:,:,0].mean())
         self.imgs -= mean
         self.imgs /= std
-        print(self.imgs[:,:,:,0].mean())
 
         if self.resize_flag:
         # Resize and reshape
@@ -259,7 +256,7 @@ class ResPredictBatch(object):
 
 
     def predict(self):
-        self.preds = self.model.predict(self.imgs, 32)
+        self.preds = self.model.predict(self.imgs, 32, verbose=1)
 
 
     def write_images(self):
@@ -315,6 +312,17 @@ def get_done_list(out_dir):
     file_list = glob.glob(os.path.join(out_dir, 'pred_*.tif'))
     ind_strs = [re.findall(r'[0-9]+', f) for f in file_list]
     done_indices = np.asarray(ind_strs).astype(int)
+
+    # Check for invalid ones (not in bounds)
+    if os.path.isfiles('invalid_indices.txt'):
+
+        invalid_df = pd.read_csv('./invalid_indices.txt',
+                                 header=None,names=['x','y'])
+        invalid_list = np.array([invalid_df['x'].values,
+                                 invalid_df['y'].values]
+                                ).T
+        done_indices = np.vstack([done_indcies, invalid_list.T])
+
     return done_indices
 
 
@@ -357,21 +365,6 @@ def prep_batches(source_path, model_structure, model_weights, done_ind):
         rasterio.open(s2_20m_path)]
 
     return start_ind, unet_model, src_list
-
-
-# def predict_batches(start_ind_batches, unet_model, img_srcs, out_dir):
-#     # Run prediction
-#     batch_count = 0
-#     for batch_ind in start_ind_batches:
-#         res_batch = ResPredictBatch(
-#             img_srcs=img_srcs, start_indices=batch_ind,
-#             batch_size=batch_ind.shape[0],
-#             dims=(OG_ROWS, OG_COLS), nbands=NBANDS,
-#             resize_dims=(RESIZE_ROWS, RESIZE_COLS), out_dir=out_dir,
-#             model=unet_model, mean_std_file='./model_data/v2/mean_std.npy')
-#         res_batch.predict_write_batch()
-#
-#     return
 
 
 def predict_fullmap(source_path, model_structure, model_weights, out_dir):
