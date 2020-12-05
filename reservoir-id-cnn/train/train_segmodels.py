@@ -58,7 +58,7 @@ BACKBONE = 'resnet34'
 loss = DiceLoss(class_weights=np.array([1,2]))
 preprocess_input = get_preprocessing(BACKBONE)
 
-BATCH_SIZE=12
+BATCH_SIZE=8
 # Set batch szie
 OG_ROWS = 500
 OG_COLS = 500
@@ -216,7 +216,9 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 
     num_bands = len(band_selection)
 
-    base_model = Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
+    base_model = Unet(backbone_name=BACKBONE, encoder_weights=None,
+                      input_shape=(None, None, num_bands),
+                      decoder_filters=(512, 256, 128, 64, 32))
     output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
     model = Model(base_model.inputs, output, name=base_model.name)
     print(model.summary())
