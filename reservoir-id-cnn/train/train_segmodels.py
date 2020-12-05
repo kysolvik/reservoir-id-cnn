@@ -171,11 +171,18 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
                                              band_selection, mask_crop=0)
 
     # Scale imgs based on train mean and std
+#     mean = np.mean(imgs_train, axis=(0,1,2), dtype='float64', keepdims=True)
+#     std = np.std(imgs_train, axis=(0,1,2), dtype='float64', keepdims=True)
+#     np.save('mean_std.npy', np.vstack((mean, std)))
+#     imgs_train -= mean
+#     imgs_train /= std
+#     print(imgs_train[...,0].mean())
     mean = np.mean(imgs_train, axis=(0,1,2))  # mean for data centering
     std = np.std(imgs_train, axis=(0,1,2))  # std for data normalization
     np.save('mean_std.npy', np.vstack((mean, std)))
     imgs_train -= mean
     imgs_train /= std
+    print(imgs_train[...,0].mean())
 
     # Prep val
     if val:
@@ -213,23 +220,28 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
     model = Model(base_model.inputs, output, name=base_model.name)
     print(model.summary())
-    optimizer = Adam(lr=learn_rate, decay=2E-3)
+    optimizer = Adam(lr=learn_rate, decay=1E-3) #Is 2E-3 better? Not sure
     model.compile(optimizer, loss=loss, metrics=[iou_score, f1_score, f1])
 
-    model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_loss',
-                                       mode='min', save_best_only=VAL)
-    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=25,
-                                   verbose=0, mode='min')
+    # Save structure
+    model_json = model.to_json()
+    with open("unet_segmodels_10band.txt", 'w') as outfile:
+        outfile.write(model_json)
+
+    model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_iou_score',
+                                       mode='max', save_best_only=VAL,
+                                       save_weights_only=True)
+    early_stopping = EarlyStopping(monitor='val_iou_score', min_delta=0, patience=30,
+                                   verbose=0, mode='max')
     model.fit(
             x=imgs_train,
             y=imgs_mask_train,
             batch_size=BATCH_SIZE,
             epochs=epochs,
             validation_data=(imgs_val, imgs_mask_val),
-            verbose=2,0
+            verbose=2,
             callbacks=[model_checkpoint, early_stopping],
         shuffle=True
-
     )
 
     # Setup callbacks
@@ -238,11 +250,6 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     print('-'*30)
     print('Fitting model...')
     print('-'*30)
-#
-#     model.fit(imgs_train, imgs_mask_train, batch_size=BATCH_SIZE, epochs=500,
-#               verbose=2, shuffle=True,
-#              validation_data=val_data,
-#               callbacks=[model_checkpoint, tensorboard, early_stopping])
 
     # Record results as dictionary
     out_dict = {}
@@ -309,7 +316,7 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 #                                     (OG_ROWS, OG_COLS),
 #                                     preserve_range = True)
         pred_mask = (pred_mask[:, :, 0] * 255).astype(np.uint8)
-        pred_mask_binary = 255*(pred_mask > (PRED_THRESHOLD*255))
+        pred_mask = 255*(pred_mask > (PRED_THRESHOLD*255))
 #         true_mask = transform.resize(true_mask,
 #                                     (OG_ROWS, OG_COLS),
 #                                     preserve_range = True)
@@ -329,8 +336,8 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 
         # Calculate basic error
         total_res_pixels += np.sum(true_mask == 255)
-        total_true_positives += np.sum((true_mask == 255) * (pred_mask_binary == 255))
-        total_false_positives += np.sum((true_mask == 0) * (pred_mask_binary == 255))
+        total_true_positives += np.sum((true_mask == 255) * (pred_mask == 255))
+        total_false_positives += np.sum((true_mask == 0) * (pred_mask == 255))
 
     print('Total Res Pixels: {}'.format(total_res_pixels))
     print('Total True Pos: {} ({})'.format(
@@ -356,5 +363,6 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     return out_dict
 
 if __name__=='__main__':
-    train(5E-4, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+#     train(4E-4, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+    train(2E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
           val=VAL, epochs=200)
