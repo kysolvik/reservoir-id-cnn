@@ -54,19 +54,19 @@ sess = tf.Session(graph=tf.get_default_graph(), config=session_conf)
 from keras import backend as K
 K.set_session(sess)
 
-BACKBONE = 'resnet34'
+BACKBONE = 'resnet50'
 loss = DiceLoss(class_weights=np.array([1,2]))
 preprocess_input = get_preprocessing(BACKBONE)
 
-BATCH_SIZE=8
+BATCH_SIZE=6
 # Set batch szie
 OG_ROWS = 500
 OG_COLS = 500
 # Original image dimensions
 # RESIZE_ROWS = 512
 # RESIZE_COLS = 512
-TIF_ROWS = 640
-TIF_COLS = 640
+TIF_ROWS = 704#640
+TIF_COLS = 704#640
 CROP_SIZE = int((TIF_ROWS - OG_ROWS)/2)
 # Dimensions of inputs (non-masks)
 PRED_THRESHOLD = 0.5
@@ -217,8 +217,8 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     num_bands = len(band_selection)
 
     base_model = Unet(backbone_name=BACKBONE, encoder_weights=None,
-                      input_shape=(None, None, num_bands),
-                      decoder_filters=(512, 256, 128, 64, 32))
+                      input_shape=(None, None, num_bands))
+                      #decoder_filters=(512, 256, 128, 64, 32))
     output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
     model = Model(base_model.inputs, output, name=base_model.name)
     print(model.summary())
@@ -366,5 +366,5 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 
 if __name__=='__main__':
 #     train(4E-4, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
-    train(2E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+    train(2.5E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
           val=VAL, epochs=200)
