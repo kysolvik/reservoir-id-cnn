@@ -25,6 +25,7 @@ import glob
 import re
 import keras.backend as K
 import gc
+import pandas as pd
 
 OG_ROWS = 640
 OG_COLS = 640
@@ -45,7 +46,7 @@ NBANDS = 12
 OVERLAP = 140
 # Overlap size, in pixels.
 
-BATCH_SIZE = 512
+BATCH_SIZE = 240 #512
 # Batch size for process/prediction
 
 BAND_SELECTION = [0, 1, 2, 3, 4, 5, 12, 13, 14, 15]
@@ -65,6 +66,10 @@ def argparse_init():
     p.add_argument('model_weights',
                    help = 'hdf5 file containing saved model weights.',
                    type = str)
+    p.add_argument('mean_std_file',
+                   help = '.npy file containing train mean and std for scaling',
+                   type = str)
+
     p.add_argument('out_dir',
                    help = 'Output directory for predicted subsets',
                    type = str)
@@ -205,10 +210,10 @@ class ResPredictBatch(object):
         nd = normalized_diff(self.imgs[:,:,:,band1], self.imgs[:,:,:,band2])
 
         # Convert to uint16
-        nd_min = nd.min()
-        nd_max = nd.max()
+        nd_minmax = np.load('../train/nd_b{}_b{}_minmax.npy'.format(band1, band2))
+        nd_min, nd_max = nd_minmax[0], nd_minmax[1]
         nd = 65535 * (nd - nd_min) / (nd_max - nd_min)
-        nd = nd.astype(np.uint16)
+        nd = nd.astype(np.int32)
 
         # Reshape
         nd = np.reshape(nd, np.append(np.asarray(nd.shape), 1))
@@ -219,6 +224,7 @@ class ResPredictBatch(object):
 
     def preprocess(self):
         self.imgs = np.moveaxis(self.imgs, [0, 1, 2, 3], [0, 3, 1, 2])
+        self.imgs = self.imgs.astype(np.int32)
 
         # Add Gao NDWI
         self.add_nd(3, 11)
@@ -236,6 +242,7 @@ class ResPredictBatch(object):
         self.imgs = self.imgs[:, :, :, BAND_SELECTION]
 
         # Apply scaling
+        self.imgs = self.imgs.astype(np.float32)
         mean_std_array = np.load(self.mean_std_file)
         mean = np.array(mean_std_array[0])
         std = np.array(mean_std_array[1])
@@ -256,13 +263,13 @@ class ResPredictBatch(object):
 
 
     def predict(self):
-        self.preds = self.model.predict(self.imgs, 32, verbose=1)
+        self.preds = self.model.predict(self.imgs, 12, verbose=1)
 
 
     def write_images(self):
         self.preds[self.preds >= 0.5] = 255
         self.preds[self.preds < 0.5] = 0
-        for i in range(self.preds.shape[0]):
+        for i in range(self.batch_indices.shape[0]):
             outfile = '{}/pred_{}-{}.tif'.format(
                 self.out_dir, self.batch_indices[i, 0], self.batch_indices[i, 1])
 
@@ -314,33 +321,32 @@ def get_done_list(out_dir):
     done_indices = np.asarray(ind_strs).astype(int)
 
     # Check for invalid ones (not in bounds)
-    if os.path.isfiles('invalid_indices.txt'):
+    if os.path.isfile('invalid_indices.txt'):
 
         invalid_df = pd.read_csv('./invalid_indices.txt',
                                  header=None,names=['x','y'])
         invalid_list = np.array([invalid_df['x'].values,
                                  invalid_df['y'].values]
                                 ).T
-        done_indices = np.vstack([done_indcies, invalid_list.T])
+        if done_indices.shape[0] > 0:
+            done_indices = np.vstack([done_indices, invalid_list])
+        else:
+            done_indices = invalid_list
+
 
     return done_indices
 
 
 def prep_batches(source_path, model_structure, model_weights, done_ind):
-    # Load model
-    with open(model_structure, 'r') as struct_file:
-        structure_json = struct_file.read()
-    unet_model = models.model_from_json(structure_json)
-    unet_model.load_weights(model_weights)
 
     # Open primary image
     src = rasterio.open(source_path)
     total_rows, total_cols = src.height, src.width
 
-    current_row = 0
-    current_col = 0
-    row_starts = np.arange(0, total_rows - OG_ROWS, OG_ROWS - OVERLAP)
-    col_starts = np.arange(0, total_cols - OG_COLS, OG_COLS - OVERLAP)
+#     row_starts = np.arange(0, total_rows - OG_ROWS, OG_ROWS - OVERLAP)
+#     col_starts = np.arange(0, total_cols - OG_COLS, OG_COLS - OVERLAP)
+    row_starts = np.arange(97000, total_rows - OG_ROWS, OG_ROWS - OVERLAP)
+    col_starts = np.arange(87500, total_cols - OG_COLS, OG_COLS - OVERLAP)
 
     # Add final indices to row_starts and col_starts
     row_starts = np.append(row_starts, total_rows - OG_ROWS)
@@ -354,7 +360,9 @@ def prep_batches(source_path, model_structure, model_weights, done_ind):
         todo_list = np.invert(np.in1d(
             start_ind.view('int, int'), done_ind.view('int, int')
         ))
+        print('To do:', todo_list.shape)
         start_ind = start_ind[todo_list]
+
 
     # Open other images and create a list of srcs
     s1_10m_path = source_path.replace('s2_10m', 's1_10m')
@@ -364,10 +372,17 @@ def prep_batches(source_path, model_structure, model_weights, done_ind):
         rasterio.open(s1_10m_path),
         rasterio.open(s2_20m_path)]
 
+    # Load model
+    with open(model_structure, 'r') as struct_file:
+        structure_json = struct_file.read()
+    unet_model = models.model_from_json(structure_json)
+    unet_model.load_weights(model_weights)
+
     return start_ind, unet_model, src_list
 
 
-def predict_fullmap(source_path, model_structure, model_weights, out_dir):
+def predict_fullmap(source_path, model_structure, model_weights, mean_std_file,
+                    out_dir):
 
     # Create output dir
     if not os.path.exists(out_dir):
@@ -386,7 +401,7 @@ def predict_fullmap(source_path, model_structure, model_weights, out_dir):
             dims=(OG_ROWS, OG_COLS), nbands=NBANDS,
             resize_flag=RESIZE_FLAG, resize_dims=(RESIZE_ROWS, RESIZE_COLS),
             out_dims=(OUT_ROWS, OUT_COLS), out_dir=out_dir,
-            model=unet_model, mean_std_file='./model_data/v3/mean_std.npy')
+            model=unet_model, mean_std_file=mean_std_file)
         batch_start_point = res_batch.predict_write_batch() + 1
         gc.collect()
 #         K.clear_session()
@@ -421,7 +436,7 @@ def main():
     args = parser.parse_args()
 
     predict_fullmap(args.source_path, args.model_structure, args.model_weights,
-                    args.out_dir)
+                    args.mean_std_file, args.out_dir)
 
     if args.mosaic is not None:
         tile_list = glob.glob('{}/*.tif'.format(args.out_dir))
