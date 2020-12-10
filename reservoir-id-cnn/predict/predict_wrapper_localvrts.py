@@ -15,6 +15,7 @@ def predict_wrapper():
     predict_map.predict_fullmap('/mnt/disks/pred_data/vrts/s2_10m.vrt',
                                 './model_data/v3/unet_segmodels_10band.txt',
                                 './model_data/v3/weights.h5',
+                                './model_data/v3/mean_std.npy',
                                 '/mnt/disks/pred_data/out/')
     return
 

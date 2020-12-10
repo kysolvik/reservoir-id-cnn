@@ -343,10 +343,10 @@ def prep_batches(source_path, model_structure, model_weights, done_ind):
     src = rasterio.open(source_path)
     total_rows, total_cols = src.height, src.width
 
-#     row_starts = np.arange(0, total_rows - OG_ROWS, OG_ROWS - OVERLAP)
-#     col_starts = np.arange(0, total_cols - OG_COLS, OG_COLS - OVERLAP)
-    row_starts = np.arange(97000, total_rows - OG_ROWS, OG_ROWS - OVERLAP)
-    col_starts = np.arange(87500, total_cols - OG_COLS, OG_COLS - OVERLAP)
+    row_starts = np.arange(0, total_rows - OG_ROWS, OG_ROWS - OVERLAP)
+    col_starts = np.arange(0, total_cols - OG_COLS, OG_COLS - OVERLAP)
+#     row_starts = np.arange(97000, total_rows - OG_ROWS, OG_ROWS - OVERLAP)
+#     col_starts = np.arange(87500, total_cols - OG_COLS, OG_COLS - OVERLAP)
 
     # Add final indices to row_starts and col_starts
     row_starts = np.append(row_starts, total_rows - OG_ROWS)
