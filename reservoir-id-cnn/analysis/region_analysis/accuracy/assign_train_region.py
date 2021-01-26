@@ -22,7 +22,7 @@ def gpd_read_csv(csv_path, x_col, y_col):
 
 
 def spat_join(points_df, poly_df):
-    join = gpd.sjoin(points_df, poly_df, how="outer", op="within")
+    join = gpd.sjoin(points_df, poly_df, how="left", op="within")
 
     return join
 
