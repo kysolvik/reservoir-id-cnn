@@ -54,19 +54,20 @@ sess = tf.Session(graph=tf.get_default_graph(), config=session_conf)
 from keras import backend as K
 K.set_session(sess)
 
-BACKBONE = 'resnet50'
-loss = DiceLoss(class_weights=np.array([1,2]))
+BACKBONE = 'resnet34'
+# loss = DiceLoss(class_weights=np.array([1,2]))
+loss = DiceLoss(class_weights=np.array([1,1]))
 preprocess_input = get_preprocessing(BACKBONE)
 
-BATCH_SIZE=6
+BATCH_SIZE=8
 # Set batch szie
 OG_ROWS = 500
 OG_COLS = 500
 # Original image dimensions
 # RESIZE_ROWS = 512
 # RESIZE_COLS = 512
-TIF_ROWS = 704#640
-TIF_COLS = 704#640
+TIF_ROWS = 640
+TIF_COLS = 640
 CROP_SIZE = int((TIF_ROWS - OG_ROWS)/2)
 # Dimensions of inputs (non-masks)
 PRED_THRESHOLD = 0.5
@@ -233,7 +234,7 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     model_checkpoint = ModelCheckpoint('weights.h5', monitor='val_iou_score',
                                        mode='max', save_best_only=VAL,
                                        save_weights_only=True)
-    early_stopping = EarlyStopping(monitor='val_iou_score', min_delta=0, patience=30,
+    early_stopping = EarlyStopping(monitor='val_iou_score', min_delta=0, patience=20,
                                    verbose=0, mode='max')
     model.fit(
             x=imgs_train,
@@ -366,5 +367,5 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 
 if __name__=='__main__':
 #     train(4E-4, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
-    train(2.5E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+    train(2E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
           val=VAL, epochs=200)
