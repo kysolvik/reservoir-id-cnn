@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Predict reservoirs on Sentinel-2 4-band raster
 
@@ -331,7 +331,7 @@ def get_done_list(out_dir):
         if done_indices.shape[0] > 0:
             done_indices = np.vstack([done_indices, invalid_list])
         else:
-            done_indices = invalid_list
+            done_indices = np.vstack([invalid_list])
 
 
     return done_indices
