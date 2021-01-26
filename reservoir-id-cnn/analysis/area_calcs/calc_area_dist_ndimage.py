@@ -8,7 +8,7 @@ from scipy import ndimage
 
 tif = sys.argv[1]
 out_txt = sys.argv[2]
-box_size = 10000
+box_size = 20000
 
 fh = gdal.Open(tif)
 
@@ -20,7 +20,6 @@ def get_count(ar):
                                     structure = [[1,1,1],[1,1,1],[1,1,1]])
     print('Count done')
 
-    # Region props
     sizes = ndimage.sum(mask, label_im, range(nb_labels + 1))
     print('Reg Props done')
     return sizes
@@ -42,10 +41,12 @@ if box_size > 0:
         ar = fh.GetRasterBand(1).ReadAsArray(
             int(start_ind[i, 1]), int(start_ind[i,0]),
             int(box_size_cols),int(box_size_rows))
-        sizes = get_count(ar)
-        with open(out_txt, 'a') as f:
-            for item in sizes:
-                f.write("%s\n" % int(item))
+        if ar.max()>0:
+            sizes = get_count(ar)
+            if len(sizes)>0:
+                with open(out_txt, 'a') as f:
+                    for item in sizes:
+                        f.write("%s\n" % int(item))
 
 else:
     ar = fh.GetRasterBand(1).ReadAsArray()
