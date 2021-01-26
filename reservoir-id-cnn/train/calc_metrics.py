@@ -4,7 +4,7 @@ from skimage import transform
 
 # test_npy_path = sys.argv[1]
 # pred_npy_path = sys.argv[2]
-pred_npy_path = './logs/v23_fulltrain_good_68f1/predict/pred_test_masks.npy'
+pred_npy_path = 'data/predict/pred_test_masks.npy'
 test_npy_path = 'data/prepped/imgs_mask_test.npy'
 
 pred = np.load(pred_npy_path)
@@ -16,8 +16,8 @@ pred[pred<0.5] = 0
 pred = pred.astype(np.uint8)
 test = np.load(test_npy_path)
 
-test = np.delete(test, -11,axis=0) # Remove HUGE reservoir)
-pred = np.delete(pred, -11,axis=0)
+# test = np.delete(test, -11,axis=0) # Remove HUGE reservoir)
+# pred = np.delete(pred, -11,axis=0)
 
 true_pos = np.sum((pred==255)*(test==255))
 false_pos = np.sum((pred==255)*(test==0))
@@ -38,6 +38,6 @@ exp_a =  ((((true_pos+false_pos)*(true_pos+false_neg))+
 kappa = (agree - exp_a)/(total - exp_a)
 f1 = 2*(precision*recall)/(precision+recall)
 iou = true_pos/(true_pos + false_pos + false_neg)
-print(agree, exp_a, kappa)
-print(pfa, pmd, pcc)
-print(precision, recall, f1, iou, true_pos, false_pos, true_neg, false_neg)
+print('agree, exp_a, kappa',agree, exp_a, kappa)
+print('pfa, pmd, pcc', pfa, pmd, pcc)
+print('prec, rec, f1, iou, tp, fp, tn, fn',precision, recall, f1, iou, true_pos, false_pos, true_neg, false_neg)
