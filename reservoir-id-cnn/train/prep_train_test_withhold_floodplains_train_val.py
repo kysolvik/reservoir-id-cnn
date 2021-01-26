@@ -5,9 +5,8 @@
 These functions download and prepare the training/test images and their
 labels/masks. Prepares them for ingestion into model.
 
-This version withholds floodplains, keeping them in train ONLY
-It's outdated. Better version is withhold_floodplains_train_val
-
+This version withholds floodplains from test, splitting them between train, val
+Best version yet
 """
 
 
@@ -27,6 +26,8 @@ import glob
 
 # Set random seed for
 random.seed(5781) # old was 5781, then 5371
+
+INPUT_SIZE = 640
 
 def argparse_init():
     """Prepare ArgumentParser for inputs."""
@@ -97,6 +98,11 @@ def save_empty_mask(mask_path, dim_x, dim_y):
     return None
 
 
+def rescale_minmax_uint16(ar, ar_min, ar_max):
+    ar = ar.astype('float64')
+    return (65535*(ar - ar_min)/(ar_max-ar_min)).astype(np.uint16)
+
+
 def normalized_diff(ar1, ar2):
     """Returns normalized difference of two arrays."""
     # Convert arrays to float32
@@ -108,11 +114,15 @@ def normalized_diff(ar1, ar2):
 def add_nd(imgs, band1, band2):
     """Add band containing NDWI."""
     nd = normalized_diff(imgs[:,:,:,band1], imgs[:,:,:,band2])
-    # Convert to uint16
-    nd_min = nd.min()
-    nd_max = nd.max()
-    nd = 65535 * (nd - nd_min) / (nd_max - nd_min)
-    nd = nd.astype(np.uint16)
+#     # Convert to uint16
+#     nd_min = nd.min()
+#     nd_max = nd.max()
+#     nd = 65535 * (nd - nd_min) / (nd_max - nd_min)
+#     nd = nd.astype(np.uint16)
+    ar_min = nd.min()
+    ar_max = nd.max()
+    np.save('./nd_b{}_b{}_minmax.npy'.format(band1, band2), np.array([ar_min, ar_max]))
+    nd = rescale_minmax_uint16(nd, ar_min, ar_max)
     # Reshape
     nd = np.reshape(nd, np.append(np.asarray(nd.shape), 1))
     # Append nd to imgs
@@ -156,7 +166,7 @@ def pad_mask(img_mask):
 
 
 def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac,
-                     withhold_list=[]):
+                     withhold_list=[], inc_val_wh=False):
     """Split data into train, test, val (or just train)
 
     Returns:
@@ -195,18 +205,6 @@ def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac,
         mask_dict['train'] = imgs_mask[train_indices]
         name_dict['train'] = img_names[train_indices]
 
-        # Insert withheld back into train
-        if wh_indices.shape[0] > 0:
-            print(mask_dict['train'].shape)
-            print(img_dict['train'].shape)
-            print(name_dict['train'].shape)
-            img_dict['train'] = np.concatenate([img_dict['train'], wh_imgs])
-            mask_dict['train'] = np.concatenate([mask_dict['train'], wh_mask])
-            name_dict['train'] = np.concatenate([name_dict['train'], wh_names])
-            print(mask_dict['train'].shape)
-            print(img_dict['train'].shape)
-            print(name_dict['train'].shape)
-
         img_dict['test'] = imgs[test_indices]
         mask_dict['test'] = imgs_mask[test_indices]
         name_dict['test'] = img_names[test_indices]
@@ -218,10 +216,47 @@ def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac,
             mask_dict['val'] = imgs_mask[val_indices]
             name_dict['val'] = img_names[val_indices]
 
+        # Insert withheld back into train (and val if inc_val_wh=True)
+        if wh_indices.shape[0] > 0:
+            if inc_val_wh:
+                wh_imgs_num = wh_indices.shape[0]
+                train_wh_count = round(wh_imgs_num * (1 - val_frac))
+                train_wh_indices = random.sample(range(wh_imgs_num), train_wh_count)
+                val_wh_indices = np.delete(np.array(range(wh_imgs_num)),
+                                        np.array(train_wh_indices))
+                img_dict['train'] = np.concatenate([img_dict['train'],
+                                                    wh_imgs[train_wh_indices]])
+                mask_dict['train'] = np.concatenate([mask_dict['train'],
+                                                     wh_mask[train_wh_indices]])
+                name_dict['train'] = np.concatenate([name_dict['train'],
+                                                     wh_names[train_wh_indices]])
+                img_dict['val'] = np.concatenate([img_dict['val'],
+                                                    wh_imgs[val_wh_indices]])
+                mask_dict['val'] = np.concatenate([mask_dict['val'],
+                                                     wh_mask[val_wh_indices]])
+                name_dict['val'] = np.concatenate([name_dict['val'],
+                                                     wh_names[val_wh_indices]])
+
+            else:
+                print(mask_dict['train'].shape)
+                print(img_dict['train'].shape)
+                print(name_dict['train'].shape)
+                img_dict['train'] = np.concatenate([img_dict['train'], wh_imgs])
+                mask_dict['train'] = np.concatenate([mask_dict['train'], wh_mask])
+                name_dict['train'] = np.concatenate([name_dict['train'], wh_names])
+                print(mask_dict['train'].shape)
+                print(img_dict['train'].shape)
+                print(name_dict['train'].shape)
+
+
     else:
         img_dict['train'] = imgs
         mask_dict['train'] = imgs_mask
         name_dict['train'] = img_names
+
+    print(img_dict['train'].shape)
+    print(img_dict['val'].shape)
+    print(img_dict['test'].shape)
 
     return img_dict, mask_dict, name_dict
 
@@ -320,6 +355,9 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
 
     print('Loading done.')
 
+#     for i in range(imgs.shape[-1]):
+#         imgs[:, :, :, i] = rescale_minmax_uint16(imgs[:, :, :, i])
+
     # Add  Gao NDWI
     imgs = add_nd(imgs, 3, 11)
     # Add  MNDWI
@@ -336,7 +374,7 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
     # Split into training, test, val
     img_dict, mask_dict, name_dict = split_train_test(
         imgs, imgs_mask, og_img_names, test_frac, val_frac,
-        withhold_list=withhold_list)
+        withhold_list=withhold_list, inc_val_wh=True)
 
     # Augment training data
     img_dict['train'], mask_dict['train'] = augment_all_training(
@@ -370,7 +408,8 @@ def main():
     if args.no_val:
         val_frac = 0
 
-    create_train_test_data(val_frac=val_frac, test_frac=test_frac)
+    create_train_test_data(val_frac=val_frac, test_frac=test_frac,
+                           img_dim_x=INPUT_SIZE, img_dim_y=INPUT_SIZE)
 
     return
 
