@@ -22,7 +22,7 @@ def gpd_read_csv(csv_path, x_col, y_col):
 
 
 def spat_join(points_df, poly_df):
-    join = gpd.sjoin(points_df, poly_df, how="inner", op="within")
+    join = gpd.sjoin(points_df, poly_df, how="outer", op="within")
 
     return join
 
@@ -43,9 +43,9 @@ def main():
     eco_df = eco_df[['ECO_NAME', 'BIOME', 'geometry']].rename(
             columns={'ECO_NAME':'ecoregion', 'BIOME':'biome'})
     all_join = spat_join(states_join, eco_df)
-
+    all_join.drop(columns=['index_right'], inplace=True)
     all_join.drop(columns=['geometry']).to_csv(
-            './data/centers_ecoregions_states.csv', index=False)
+            './data/centers_ecoregions_states_outer.csv', index=False)
 
 if __name__=='__main__':
     main()

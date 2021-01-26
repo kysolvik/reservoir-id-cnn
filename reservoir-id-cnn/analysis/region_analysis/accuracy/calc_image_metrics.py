@@ -6,11 +6,11 @@ import numpy as np
 from skimage import transform
 import pandas as pd
 
-pred_npy_path = '../../train/logs/v23_fulltrain_good_68f1/predict/pred_test_masks.npy'
-masks_npy_path = '../../train/data/prepped/imgs_mask_test.npy'
-train_names_path = '../../train/data/prepped/train_names.csv'
-test_names_path = '../../train/data/prepped/test_names.csv'
-region_csv = './data/centers_ecoregions_states.csv'
+pred_npy_path = '../../../train/logs/v63_unweighted_loss_greatperf/predict/pred_test_masks.npy'
+masks_npy_path = '../../../train/logs/v63_unweighted_loss_greatperf/prepped/imgs_mask_test.npy'
+train_names_path = '../../../train/logs/v63_unweighted_loss_greatperf/prepped/train_names.csv'
+test_names_path = '../../../train/logs/v63_unweighted_loss_greatperf/prepped/test_names.csv'
+region_csv = './data/centers_ecoregions_states_outer.csv'
 
 pred = np.load(pred_npy_path)
 pred = pred[:,:,:,0]
@@ -20,9 +20,6 @@ pred[pred>0.5] = 255
 pred[pred<0.5] = 0
 pred = pred.astype(np.uint8)
 test = np.load(masks_npy_path)
-
-test = np.delete(test, -11,axis=0) # Remove HUGE reservoir)
-pred = np.delete(pred, -11,axis=0)
 
 test_names_df = pd.read_csv(test_names_path, header=None)
 
@@ -49,15 +46,15 @@ for i in range(pred.shape[0]):
 
 
 # Join region, biome, etc.
-region_df = pd.read_csv('./data/centers_ecoregions_states.csv')
+region_df = pd.read_csv(region_csv)
 metrics_df = pd.merge(metrics_df, region_df, how='inner', on='filename').drop(
-    columns=['index_right', 'filename'])
+    columns=['filename'])
 
 metrics_df.to_csv('data/test_metrics_regions.csv', index=False)
 
 # Assign training images to regions
 train_names_df = pd.read_csv(train_names_path, header=None).rename(columns={0:'filename'})
 train_regions = pd.merge(train_names_df, region_df, how='inner', on='filename').drop(
-    columns=['index_right', 'filename'])
+    columns=['filename'])
 
 train_regions.to_csv('data/train_regions.csv', index=False)
