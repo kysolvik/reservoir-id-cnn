@@ -5,6 +5,9 @@
 These functions download and prepare the training/test images and their
 labels/masks. Prepares them for ingestion into model.
 
+This version withholds floodplains, keeping them in train ONLY
+It's outdated. Better version is withhold_floodplains_train_val
+
 """
 
 
@@ -96,31 +99,24 @@ def save_empty_mask(mask_path, dim_x, dim_y):
 
 def normalized_diff(ar1, ar2):
     """Returns normalized difference of two arrays."""
-
     # Convert arrays to float32
     ar1 = ar1.astype('float32')
     ar2 = ar2.astype('float32')
-
     return np.nan_to_num(((ar1 - ar2) / (ar1 + ar2)),0)
 
 
 def add_nd(imgs, band1, band2):
     """Add band containing NDWI."""
-
     nd = normalized_diff(imgs[:,:,:,band1], imgs[:,:,:,band2])
-
     # Convert to uint16
     nd_min = nd.min()
     nd_max = nd.max()
     nd = 65535 * (nd - nd_min) / (nd_max - nd_min)
     nd = nd.astype(np.uint16)
-
     # Reshape
     nd = np.reshape(nd, np.append(np.asarray(nd.shape), 1))
-
     # Append nd to imgs
     imgs_wnd = np.append(imgs, nd, axis=3)
-
     return imgs_wnd
 
 
