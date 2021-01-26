@@ -5,6 +5,8 @@
 These functions download and prepare the training/test images and their
 labels/masks. Prepares them for ingestion into model.
 
+This version withholds floodplains from test, splitting them between train, val
+Best version yet
 """
 
 
@@ -24,6 +26,8 @@ import glob
 
 # Set random seed for
 random.seed(5781) # old was 5781, then 5371
+
+INPUT_SIZE = 640
 
 def argparse_init():
     """Prepare ArgumentParser for inputs."""
@@ -94,39 +98,35 @@ def save_empty_mask(mask_path, dim_x, dim_y):
     return None
 
 
-def rescale_minmax_uint16(ar):
+def rescale_minmax_uint16(ar, ar_min, ar_max):
     ar = ar.astype('float64')
-    return (65535*(ar - ar.min())/(ar.max()-ar.min())).astype(np.uint16)
+    return (65535*(ar - ar_min)/(ar_max-ar_min)).astype(np.uint16)
 
 
 def normalized_diff(ar1, ar2):
     """Returns normalized difference of two arrays."""
-
     # Convert arrays to float32
     ar1 = ar1.astype('float32')
     ar2 = ar2.astype('float32')
-
     return np.nan_to_num(((ar1 - ar2) / (ar1 + ar2)),0)
 
 
 def add_nd(imgs, band1, band2):
     """Add band containing NDWI."""
-
     nd = normalized_diff(imgs[:,:,:,band1], imgs[:,:,:,band2])
-
 #     # Convert to uint16
 #     nd_min = nd.min()
 #     nd_max = nd.max()
 #     nd = 65535 * (nd - nd_min) / (nd_max - nd_min)
 #     nd = nd.astype(np.uint16)
-    nd = rescale_minmax_uint16(nd)
-
+    ar_min = nd.min()
+    ar_max = nd.max()
+    np.save('./nd_b{}_b{}_minmax.npy'.format(band1, band2), np.array([ar_min, ar_max]))
+    nd = rescale_minmax_uint16(nd, ar_min, ar_max)
     # Reshape
     nd = np.reshape(nd, np.append(np.asarray(nd.shape), 1))
-
     # Append nd to imgs
     imgs_wnd = np.append(imgs, nd, axis=3)
-
     return imgs_wnd
 
 
@@ -355,8 +355,8 @@ def create_train_test_data(mask_dim_x=500, mask_dim_y=500,
 
     print('Loading done.')
 
-    for i in range(imgs.shape[-1]):
-        imgs[:, :, :, i] = rescale_minmax_uint16(imgs[:, :, :, i])
+#     for i in range(imgs.shape[-1]):
+#         imgs[:, :, :, i] = rescale_minmax_uint16(imgs[:, :, :, i])
 
     # Add  Gao NDWI
     imgs = add_nd(imgs, 3, 11)
@@ -408,7 +408,8 @@ def main():
     if args.no_val:
         val_frac = 0
 
-    create_train_test_data(val_frac=val_frac, test_frac=test_frac)
+    create_train_test_data(val_frac=val_frac, test_frac=test_frac,
+                           img_dim_x=INPUT_SIZE, img_dim_y=INPUT_SIZE)
 
     return
 
