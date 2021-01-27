@@ -25,7 +25,7 @@ import augment_data as augment
 import glob
 
 # Set random seed for
-random.seed(5781) # old was 5781, then 5371
+random.seed(5789) # old was 5781, then 5371
 
 INPUT_SIZE = 640
 
