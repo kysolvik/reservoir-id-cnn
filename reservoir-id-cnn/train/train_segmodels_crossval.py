@@ -26,11 +26,11 @@ from segmentation_models import Unet
 from segmentation_models import get_preprocessing
 from segmentation_models.losses import bce_jaccard_loss, DiceLoss
 from segmentation_models.metrics import iou_score, f1_score, precision, recall
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 
 # Seed value
 # Apparently you may use different seed values at each stage
-seed_value= 584
+seed_value= 583
 
 # 1. Set the `PYTHONHASHSEED` environment variable at a fixed value
 import os
@@ -56,10 +56,10 @@ from keras import backend as K
 K.set_session(sess)
 
 BACKBONE = 'resnet34'
-loss = DiceLoss(class_weights=np.array([1,2]))
+loss = DiceLoss(class_weights=np.array([1,1]))
 preprocess_input = get_preprocessing(BACKBONE)
 
-BATCH_SIZE=12
+BATCH_SIZE=8
 # Set batch szie
 OG_ROWS = 500
 OG_COLS = 500
@@ -74,7 +74,18 @@ PRED_THRESHOLD = 0.5
 # Prediction threshold. > PRED_THRESHOLD will be classified as res.
 VAL = False
 # Includes separate validation set (separate from test)
+NUM_FLOODPLAINS=103
 
+
+def scale_image_tobyte(ar):
+    """Scale larger data type array to byte"""
+    min_val = np.min(ar)
+    max_val = np.max(ar)
+    byte_ar = (np.round(255.0 * (ar - min_val) / (max_val - min_val))
+               .astype(np.uint8))
+    byte_ar[ar == 0] = 0
+
+    return(byte_ar)
 
 
 def preprocess(imgs, masks, band_selection, mask_crop=0):
@@ -112,13 +123,17 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     imgs_train, imgs_mask_train = preprocess(imgs_train, imgs_mask_train,
                                              band_selection, mask_crop=0)
 
+    # Remove floodplains
+    imgs_train_fp, imgs_train = imgs_train[-NUM_FLOODPLAINS:], imgs_train[:-NUM_FLOODPLAINS]
+    imgs_mask_train_fp, imgs_mask_train = imgs_mask_train[-NUM_FLOODPLAINS:], imgs_mask_train[:-NUM_FLOODPLAINS]
 
-    # Prep K-fold cross-val
+    # Separate aug and non-aug
     num_train = int(imgs_train.shape[0]/2)
     imgs_mask_train_aug, imgs_mask_train = imgs_mask_train[num_train:], imgs_mask_train[:num_train]
     imgs_train_aug, imgs_train = imgs_train[num_train:], imgs_train[:num_train]
-    kfold = KFold(n_splits=5, shuffle=True, random_state=seed_value)
 
+    # Prep K-fold cross-val
+    kfold = KFold(n_splits=5, shuffle=True, random_state=seed_value)
 
     print('-'*30)
     print('Creating and compiling model...')
@@ -131,26 +146,35 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
         'recall':[]
     }
     for train, test in kfold.split(imgs_train, imgs_mask_train):
-        x_train = np.vstack([imgs_train[train], imgs_train_aug[train]])
-        y_train = np.vstack([imgs_mask_train[train], imgs_mask_train_aug[train]])
+        x_train = np.vstack([imgs_train[train], imgs_train_aug[train],
+                             imgs_train_fp])
+        y_train = np.vstack([imgs_mask_train[train], imgs_mask_train_aug[train],
+                             imgs_mask_train_fp])
+
+        print(x_train.shape)
+        # Create val set
+        x_train, x_val, y_train, y_val = train_test_split(
+            x_train, y_train,
+            train_size=0.8, test_size=0.2,
+            random_state=seed_value)
         x_test = imgs_train[test]
         y_test = imgs_mask_train[test]
 
         # Scale imgs based on train mean and std
-        mean = np.mean(x_train, axis=(0,1,2))  # mean for data centering
-        std = np.std(x_train, axis=(0,1,2))  # std for data normalization
-        x_train -= mean
-        x_train /= std
-        x_train = preprocess_input(x_train)
+        mean = np.mean(imgs_train, axis=(0,1,2))  # mean for data centering
+        std = np.std(imgs_train, axis=(0,1,2))  # std for data normalization
+        np.save('mean_std_{}.npy'.format(i), np.vstack((mean, std)))
+        imgs_train -= mean
+        imgs_train /= std
+        print(imgs_train[...,0].mean())
 
-        # Preprocess, scale val
+        # Preprocess, scale val and test
+        x_val -= mean
+        x_val /= std
+        x_val = preprocess_input(x_val)
         x_test -= mean
         x_test /= std
         x_test = preprocess_input(x_test)
-
-
-
-
 
         num_bands = len(band_selection)
 
@@ -170,7 +194,7 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
                 y=y_train,
                 batch_size=BATCH_SIZE,
                 epochs=epochs,
-                validation_data=(x_test, y_test),
+                validation_data=(x_val, y_val),
                 verbose=2,
                 callbacks=[model_checkpoint, early_stopping],
             shuffle=True
@@ -181,10 +205,12 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
         cvscores['f1'].append(scores[2]*100)
         cvscores['precision'].append(scores[3]*100)
         cvscores['recall'].append(scores[4]*100)
+        print('CV So Far:', cvscores)
 
         i+=1
+    print('CV Final:', cvscores)
 
 
 if __name__=='__main__':
-    train(1E-4, lf.dice_coef_wgt_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
-          val=VAL, epochs=150)
+    train(2E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+          val=VAL, epochs=100)
