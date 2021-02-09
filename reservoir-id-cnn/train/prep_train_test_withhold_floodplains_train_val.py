@@ -181,19 +181,19 @@ def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac,
     img_names = np.array(img_names)
     print(img_names.shape)
 
-    # Pull out data we're withholding, we'll add back in to train
-    wh_indices = np.where(np.in1d(img_names, withhold_list))[0]
-    print(wh_indices.shape)
-    if wh_indices.shape[0] > 0:
-        wh_imgs, imgs = imgs[wh_indices], np.delete(imgs, wh_indices, axis=0)
-        wh_mask, imgs_mask = imgs_mask[wh_indices], np.delete(imgs_mask, wh_indices, axis=0)
-        wh_names, img_names = img_names[wh_indices], np.delete(img_names, wh_indices, axis=0)
-    print(wh_imgs.shape)
-    print(imgs.shape)
-
-    total_ims = imgs.shape[0]
     if test_frac != 0:
 
+        # Pull out data we're withholding, we'll add back in to train
+        wh_indices = np.where(np.in1d(img_names, withhold_list))[0]
+        print(wh_indices.shape)
+        if wh_indices.shape[0] > 0:
+            wh_imgs, imgs = imgs[wh_indices], np.delete(imgs, wh_indices, axis=0)
+            wh_mask, imgs_mask = imgs_mask[wh_indices], np.delete(imgs_mask, wh_indices, axis=0)
+            wh_names, img_names = img_names[wh_indices], np.delete(img_names, wh_indices, axis=0)
+        print(wh_imgs.shape)
+        print(imgs.shape)
+
+        total_ims = imgs.shape[0]
         train_count = round(total_ims * (1 - test_frac - val_frac))
         train_indices = random.sample(range(total_ims), train_count)
         test_val_indices = np.delete(np.array(range(total_ims)), train_indices)
