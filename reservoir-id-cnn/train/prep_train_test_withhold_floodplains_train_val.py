@@ -255,8 +255,10 @@ def split_train_test(imgs, imgs_mask, img_names, test_frac, val_frac,
         name_dict['train'] = img_names
 
     print(img_dict['train'].shape)
-    print(img_dict['val'].shape)
-    print(img_dict['test'].shape)
+    if val_frac > 0:
+        print(img_dict['val'].shape)
+    if test_frac > 0:
+        print(img_dict['test'].shape)
 
     return img_dict, mask_dict, name_dict
 
