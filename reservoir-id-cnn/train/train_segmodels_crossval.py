@@ -30,7 +30,7 @@ from sklearn.model_selection import KFold, train_test_split
 
 # Seed value
 # Apparently you may use different seed values at each stage
-seed_value= 583
+seed_value= 584
 
 # 1. Set the `PYTHONHASHSEED` environment variable at a fixed value
 import os
@@ -150,6 +150,8 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
                              imgs_train_fp])
         y_train = np.vstack([imgs_mask_train[train], imgs_mask_train_aug[train],
                              imgs_mask_train_fp])
+        x_test = imgs_train[test]
+        y_test = imgs_mask_train[test]
 
         print(x_train.shape)
         # Create val set
@@ -157,16 +159,15 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
             x_train, y_train,
             train_size=0.8, test_size=0.2,
             random_state=seed_value)
-        x_test = imgs_train[test]
-        y_test = imgs_mask_train[test]
 
         # Scale imgs based on train mean and std
-        mean = np.mean(imgs_train, axis=(0,1,2))  # mean for data centering
-        std = np.std(imgs_train, axis=(0,1,2))  # std for data normalization
+        mean = np.mean(x_train, axis=(0,1,2), dtype='float64')  # mean for data centering
+        std = np.std(x_train, axis=(0,1,2),dtype='float64')  # std for data normalization
+        print(mean, std)
         np.save('mean_std_{}.npy'.format(i), np.vstack((mean, std)))
-        imgs_train -= mean
-        imgs_train /= std
-        print(imgs_train[...,0].mean())
+        x_train -= mean
+        x_train /= std
+        print(x_train[...,0].mean())
 
         # Preprocess, scale val and test
         x_val -= mean
@@ -175,6 +176,10 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
         x_test -= mean
         x_test /= std
         x_test = preprocess_input(x_test)
+
+        # Check on shapes
+        print(x_train.shape, x_val.shape, x_test.shape)
+        print(y_train.shape, y_val.shape, y_test.shape)
 
         num_bands = len(band_selection)
 
@@ -200,7 +205,9 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
             shuffle=True
         )
 
-        scores = model.evaluate(x_test, y_test, verbose=0)
+        scores = model.evaluate(x_test, y_test, batch_size=BATCH_SIZE, verbose=0)
+        pred = model.predict(x_test, batch_size=BATCH_SIZE)
+        np.save('./data/predict/predict_{}.npy'.format(i), pred)
         cvscores['iou'].append(scores[1]*100)
         cvscores['f1'].append(scores[2]*100)
         cvscores['precision'].append(scores[3]*100)
