@@ -17,6 +17,7 @@ import math
 from keras import models
 from sklearn.model_selection import KFold, train_test_split
 from segmentation_models import get_preprocessing
+import pandas as pd
 
 model_structure = './unet_segmodels_10band.txt'
 
@@ -29,6 +30,10 @@ NUM_FLOODPLAINS=103
 
 BACKBONE = 'resnet34'
 preprocess_input = get_preprocessing(BACKBONE)
+
+def remove_floodplains(imgs_ar, num_floodplains):
+    """Splits floodplains and not floodplains into separate arrays"""
+    return imgs_ar[-num_floodplains:], imgs_ar[:-num_floodplains]
 
 def preprocess(imgs, masks, band_selection, mask_crop=0):
     """Preprocess imgs and masks, returning preprocessed copies"""
@@ -62,17 +67,23 @@ def eval(band_selection):
     # Prep train
     imgs_train = np.load('./data/prepped/imgs_train.npy')
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
+    names_train = pd.read_csv('./data/prepped/train_names.csv',
+                              header=None, names=['name'])
     imgs_train, imgs_mask_train = preprocess(imgs_train, imgs_mask_train,
                                              band_selection, mask_crop=0)
 
-    # Remove floodplains
-    imgs_train_fp, imgs_train = imgs_train[-NUM_FLOODPLAINS:], imgs_train[:-NUM_FLOODPLAINS]
-    imgs_mask_train_fp, imgs_mask_train = imgs_mask_train[-NUM_FLOODPLAINS:], imgs_mask_train[:-NUM_FLOODPLAINS]
 
     # Separate aug and non-aug
     num_train = int(imgs_train.shape[0]/2)
     imgs_mask_train_aug, imgs_mask_train = imgs_mask_train[num_train:], imgs_mask_train[:num_train]
     imgs_train_aug, imgs_train = imgs_train[num_train:], imgs_train[:num_train]
+
+    # Remove floodplains
+    imgs_train_fp, imgs_train = remove_floodplains(imgs_train, NUM_FLOODPLAINS)
+    imgs_mask_train_fp, imgs_mask_train = remove_floodplains(imgs_mask_train, NUM_FLOODPLAINS)
+    imgs_train_aug_fp, imgs_train_aug = remove_floodplains(imgs_train_aug, NUM_FLOODPLAINS)
+    imgs_mask_train_aug_fp, imgs_mask_train_aug = remove_floodplains(imgs_mask_train_aug, NUM_FLOODPLAINS)
+    print('Should be 0: ', imgs_mask_train_fp.max(), imgs_mask_train_aug_fp.max())
 
     # Prep K-fold cross-val
     kfold = KFold(n_splits=5, shuffle=True, random_state=seed_value)
@@ -90,6 +101,8 @@ def eval(band_selection):
     for train, test in kfold.split(imgs_train, imgs_mask_train):
         x_test = imgs_train[test]
         y_test = imgs_mask_train[test]
+        names_test = names_train[test]
+        names_test.to_csv('./data/prepped/test_names_{}.csv', index=False)
 
 
         if not os.path.exists('./data/predict/predict_{}.npy'.format(i)):
