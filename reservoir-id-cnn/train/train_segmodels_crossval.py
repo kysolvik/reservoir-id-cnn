@@ -30,7 +30,7 @@ from sklearn.model_selection import KFold, train_test_split
 
 # Seed value
 # Apparently you may use different seed values at each stage
-seed_value= 584
+seed_value= 585
 
 # 1. Set the `PYTHONHASHSEED` environment variable at a fixed value
 import os
@@ -109,6 +109,10 @@ def preprocess(imgs, masks, band_selection, mask_crop=0):
     return imgs, masks
 
 
+def remove_floodplains(imgs_ar, num_floodplains):
+    """Splits floodplains and not floodplains into separate arrays"""
+    return imgs_ar[-num_floodplains:], imgs_ar[:-num_floodplains]
+
 def train(learn_rate, loss_func, band_selection, val, epochs=200):
     """Master function for training"""
     print('-'*30)
@@ -123,14 +127,17 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     imgs_train, imgs_mask_train = preprocess(imgs_train, imgs_mask_train,
                                              band_selection, mask_crop=0)
 
-    # Remove floodplains
-    imgs_train_fp, imgs_train = imgs_train[-NUM_FLOODPLAINS:], imgs_train[:-NUM_FLOODPLAINS]
-    imgs_mask_train_fp, imgs_mask_train = imgs_mask_train[-NUM_FLOODPLAINS:], imgs_mask_train[:-NUM_FLOODPLAINS]
-
     # Separate aug and non-aug
     num_train = int(imgs_train.shape[0]/2)
     imgs_mask_train_aug, imgs_mask_train = imgs_mask_train[num_train:], imgs_mask_train[:num_train]
     imgs_train_aug, imgs_train = imgs_train[num_train:], imgs_train[:num_train]
+
+    # Remove floodplains
+    imgs_train_fp, imgs_train = remove_floodplains(imgs_train, NUM_FLOODPLAINS)
+    imgs_mask_train_fp, imgs_mask_train = remove_floodplains(imgs_mask_train, NUM_FLOODPLAINS)
+    imgs_train_aug_fp, imgs_train_aug = remove_floodplains(imgs_train_aug, NUM_FLOODPLAINS)
+    imgs_mask_train_aug_fp, imgs_mask_train_aug = remove_floodplains(imgs_mask_train_aug, NUM_FLOODPLAINS)
+    print('Should be 0: ', imgs_mask_train_fp.max(), imgs_mask_train_aug_fp.max())
 
     # Prep K-fold cross-val
     kfold = KFold(n_splits=5, shuffle=True, random_state=seed_value)
@@ -146,19 +153,36 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
         'recall':[]
     }
     for train, test in kfold.split(imgs_train, imgs_mask_train):
-        x_train = np.vstack([imgs_train[train], imgs_train_aug[train],
+        # Split up train and test
+        # Train set contains augmented AND floodplains data
+        # Val set contains no augmented data, but has FP
+        # Test set contains no augmented OR FP
+        x_train = np.vstack([imgs_train[train],
                              imgs_train_fp])
-        y_train = np.vstack([imgs_mask_train[train], imgs_mask_train_aug[train],
+        y_train = np.vstack([imgs_mask_train[train],
                              imgs_mask_train_fp])
+        x_train_aug = np.vstack([imgs_train_aug[train], imgs_train_aug_fp])
+        y_train_aug = np.vstack([imgs_mask_train_aug[train], imgs_mask_train_aug_fp])
         x_test = imgs_train[test]
         y_test = imgs_mask_train[test]
 
-        print(x_train.shape)
-        # Create val set
-        x_train, x_val, y_train, y_val = train_test_split(
-            x_train, y_train,
-            train_size=0.8, test_size=0.2,
+
+        # Create val set via indices to only add aug to train
+        train_size = x_train.shape[0]
+        train_nums = np.arange(train_size)
+        train_indices, val_indices =  train_test_split(
+            train_nums,
+            train_size = 0.8, test_size = 0.2 ,
             random_state=seed_value)
+        x_train = np.vstack([x_train[train_indices], x_train_aug[train_indices]])
+        y_train = np.vstack([y_train[train_indices], y_train_aug[train_indices]])
+        x_val = x_train[val_indices]
+        y_val = y_train[val_indices]
+
+        # Check shapes
+        print(x_train.shape, y_train.shape)
+        print(x_val.shape, y_val.shape)
+        print(x_test.shape, y_test.shape)
 
         # Scale imgs based on train mean and std
         mean = np.mean(x_train, axis=(0,1,2), dtype='float64')  # mean for data centering
@@ -177,20 +201,21 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
         x_test /= std
         x_test = preprocess_input(x_test)
 
-        # Check on shapes
-        print(x_train.shape, x_val.shape, x_test.shape)
-        print(y_train.shape, y_val.shape, y_test.shape)
+        # Check on shapes (again)
+        print(x_train.shape, y_train.shape)
+        print(x_val.shape, y_val.shape)
+        print(x_test.shape, y_test.shape)
 
         num_bands = len(band_selection)
 
         base_model = Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
         output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
         model = Model(base_model.inputs, output, name=base_model.name)
-        optimizer = Adam(lr=learn_rate, decay=1E-3)
+        optimizer = Adam(lr=learn_rate, decay=2E-3)
         model.compile(optimizer, loss=loss, metrics=[iou_score, f1_score, precision, recall])
 
         model_checkpoint = ModelCheckpoint('weights_{}.h5'.format(i),
-                                           save_best_only=False,
+                                           save_best_only=True,
                                            save_weights_only=True)
         early_stopping = EarlyStopping(monitor='val_iou_score', min_delta=0, patience=20,
                                     verbose=0, mode='max')
