@@ -30,7 +30,7 @@ from sklearn.model_selection import KFold, train_test_split
 
 # Seed value
 # Apparently you may use different seed values at each stage
-seed_value= 585
+seed_value= 587
 
 # 1. Set the `PYTHONHASHSEED` environment variable at a fixed value
 import os
@@ -138,6 +138,8 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
     imgs_train_aug_fp, imgs_train_aug = remove_floodplains(imgs_train_aug, NUM_FLOODPLAINS)
     imgs_mask_train_aug_fp, imgs_mask_train_aug = remove_floodplains(imgs_mask_train_aug, NUM_FLOODPLAINS)
     print('Should be 0: ', imgs_mask_train_fp.max(), imgs_mask_train_aug_fp.max())
+    assert imgs_train_aug.shape[0] == imgs_train.shape[0]
+    assert imgs_train_aug.shape[0] == imgs_train.shape[0]
 
     # Prep K-fold cross-val
     kfold = KFold(n_splits=5, shuffle=True, random_state=seed_value)
@@ -152,32 +154,41 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
         'precision':[],
         'recall':[]
     }
-    for train, test in kfold.split(imgs_train, imgs_mask_train):
+    train_test_splits = [s for s in kfold.split(imgs_train)]
+    fp_train_test_splits = [s for s in kfold.split(imgs_train_fp)]
+    for i in range(len(train_test_splits)):
         # Split up train and test
         # Train set contains augmented AND floodplains data
         # Val set contains no augmented data, but has FP
         # Test set contains no augmented OR FP
+        test = train_test_splits[i][1]
+        val = train_test_splits[i-1][1]
+        train = np.delete(train, np.vstack([val,test]),axis=0)
+        train = train_test_splits[i][0]
+        train_fp = fp_train_test_splits[i][0]
+        val_fp = fp_train_test_splits[i][1]
+        print(train.shape, val.shape, test.shape)
+
+        # Train
         x_train = np.vstack([imgs_train[train],
-                             imgs_train_fp])
+                             imgs_train_fp[train_fp],
+                             imgs_train_aug[train],
+                             imgs_train_aug_fp[train_fp]])
         y_train = np.vstack([imgs_mask_train[train],
-                             imgs_mask_train_fp])
-        x_train_aug = np.vstack([imgs_train_aug[train], imgs_train_aug_fp])
-        y_train_aug = np.vstack([imgs_mask_train_aug[train], imgs_mask_train_aug_fp])
+                             imgs_mask_train_fp[train_fp],
+                             imgs_mask_train_aug[train],
+                             imgs_mask_train_aug_fp[train_fp]])
+
+        # Val
+        x_val = np.vstack([imgs_train[val],
+                             imgs_train_fp[val_fp]])
+        y_val = np.vstack([imgs_mask_train[val],
+                             imgs_mask_train_fp[val_fp]])
+
+        # Test
         x_test = imgs_train[test]
         y_test = imgs_mask_train[test]
 
-
-        # Create val set via indices to only add aug to train
-        train_size = x_train.shape[0]
-        train_nums = np.arange(train_size)
-        train_indices, val_indices =  train_test_split(
-            train_nums,
-            train_size = 0.8, test_size = 0.2 ,
-            random_state=seed_value)
-        x_train = np.vstack([x_train[train_indices], x_train_aug[train_indices]])
-        y_train = np.vstack([y_train[train_indices], y_train_aug[train_indices]])
-        x_val = x_train[val_indices]
-        y_val = y_train[val_indices]
 
         # Check shapes
         print(x_train.shape, y_train.shape)
@@ -230,6 +241,8 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
             shuffle=True
         )
 
+        model.load_weights('weights_{}.h5'.format(i))
+
         scores = model.evaluate(x_test, y_test, batch_size=BATCH_SIZE, verbose=0)
         pred = model.predict(x_test, batch_size=BATCH_SIZE)
         np.save('./data/predict/predict_{}.npy'.format(i), pred)
@@ -244,5 +257,5 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 
 
 if __name__=='__main__':
-    train(2E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+    train(2.5E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
           val=VAL, epochs=100)
