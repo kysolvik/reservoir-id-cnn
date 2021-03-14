@@ -21,7 +21,7 @@ import pandas as pd
 
 model_structure = './unet_segmodels_10band.txt'
 
-seed_value= 584
+seed_value= 587
 
 # Set batch szie
 BATCH_SIZE=8
@@ -35,15 +35,10 @@ def remove_floodplains(imgs_ar, num_floodplains):
     """Splits floodplains and not floodplains into separate arrays"""
     return imgs_ar[-num_floodplains:], imgs_ar[:-num_floodplains]
 
-def preprocess(imgs, masks, band_selection, mask_crop=0):
+def preprocess_mask(masks, mask_crop=0):
     """Preprocess imgs and masks, returning preprocessed copies"""
-    num_bands = len(band_selection)
-    # Select target bands
-    imgs = imgs[:, :, :, band_selection]
-
     masks = np.expand_dims(masks, 3)
 
-    imgs = imgs.astype('float32')
     masks = masks.astype('float32')
 
     masks /= 255.  # scale masks to [0, 1]
@@ -51,10 +46,7 @@ def preprocess(imgs, masks, band_selection, mask_crop=0):
     masks[masks < 0.5] = 0
 
     # Crop Mask:
-    if mask_crop!=0:
-        masks = masks[:,mask_crop:(-1*mask_crop), mask_crop:(-1*mask_crop)]
-    return imgs, masks
-
+    return masks
 
 def eval(band_selection):
     """Master function for training"""
@@ -62,26 +54,19 @@ def eval(band_selection):
     print('Loading and preprocessing train data...')
     print('-'*30)
 
-    num_bands = len(band_selection)
-
     # Prep train
-    imgs_train = np.load('./data/prepped/imgs_train.npy')
     imgs_mask_train = np.load('./data/prepped/imgs_mask_train.npy')
     names_train = pd.read_csv('./data/prepped/train_names.csv',
                               header=None, names=['name'])
-    imgs_train, imgs_mask_train = preprocess(imgs_train, imgs_mask_train,
-                                             band_selection, mask_crop=0)
-
+    imgs_mask_train = preprocess_mask(imgs_mask_train,
+                                 mask_crop=0)
 
     # Separate aug and non-aug
-    num_train = int(imgs_train.shape[0]/2)
+    num_train = int(imgs_mask_train.shape[0]/2)
     imgs_mask_train_aug, imgs_mask_train = imgs_mask_train[num_train:], imgs_mask_train[:num_train]
-    imgs_train_aug, imgs_train = imgs_train[num_train:], imgs_train[:num_train]
 
     # Remove floodplains
-    imgs_train_fp, imgs_train = remove_floodplains(imgs_train, NUM_FLOODPLAINS)
     imgs_mask_train_fp, imgs_mask_train = remove_floodplains(imgs_mask_train, NUM_FLOODPLAINS)
-    imgs_train_aug_fp, imgs_train_aug = remove_floodplains(imgs_train_aug, NUM_FLOODPLAINS)
     imgs_mask_train_aug_fp, imgs_mask_train_aug = remove_floodplains(imgs_mask_train_aug, NUM_FLOODPLAINS)
     print('Should be 0: ', imgs_mask_train_fp.max(), imgs_mask_train_aug_fp.max())
 
@@ -91,54 +76,43 @@ def eval(band_selection):
     print('-'*30)
     print('Creating and compiling model...')
     print('-'*30)
-    i=0
     cvscores = {
         'iou':[],
         'f1':[],
         'precision':[],
         'recall':[]
     }
-    for train, test in kfold.split(imgs_train, imgs_mask_train):
-        x_test = imgs_train[test]
+    train_test_splits = [s for s in kfold.split(imgs_mask_train)]
+    for i in range(len(train_test_splits)):
+        # Split up train and test
+        # Train set contains augmented AND floodplains data
+        # Val set contains no augmented data, but has FP
+        # Test set contains no augmented OR FP
+        test = train_test_splits[i][1]
+
+        # Test
         y_test = imgs_mask_train[test]
-        names_test = names_train[test]
-        names_test.to_csv('./data/prepped/test_names_{}.csv', index=False)
+        names_test = names_train.iloc[test]
+        names_test.to_csv('./data/prepped/test_names_{}.csv'.format(i), index=False)
+        pred = np.load('./data/predict/predict_{}.npy'.format(i))
 
-
-        if not os.path.exists('./data/predict/predict_{}.npy'.format(i)):
-            # Scale imgs based on train mean and std
-            mean_std_array = np.load('./mean_std_{}.npy'.format(i))
-            mean = np.array(mean_std_array[0])
-            std = np.array(mean_std_array[1])
-
-            # Preprocess, scale val and test
-            x_test -= mean
-            x_test /= std
-            x_test = preprocess_input(x_test)
-
-            # Check on shapes
-            print(x_test.shape)
-            print(y_test.shape)
-
-            num_bands = len(band_selection)
-
-            # Load model
-            with open(model_structure, 'r') as struct_file:
-                structure_json = struct_file.read()
-            unet_model = models.model_from_json(structure_json)
-            unet_model.load_weights('./weights_{}.h5'.format(i))
-
-            # Evaluate
-            pred = unet_model.predict(x_test, 8,verbose=1)
-            np.save('./data/predict/predict_{}.npy'.format(i), pred)
-        else:
-            pred = np.load('./data/predict/predict_{}.npy'.format(i))
         print(pred.max())
         print(y_test.max())
         pred[pred>0.5] = 255
         pred[pred<0.5] = 0
         y_test[y_test>0.5] = 255
         y_test[y_test<0.5] = 0
+        print(np.unique(y_test))
+        print(np.unique(pred))
+        pred_sums = np.sum(pred==255, axis=(1,2,3))
+        mask_sums = np.sum(y_test==255, axis=(1,2,3))
+        print(np.sum(mask_sums>2000))
+        print(names_test.iloc[mask_sums>2000])
+#         pred = pred[mask_sums<2000]
+#         y_test = y_test[mask_sums<2000]
+        print(np.mean(mask_sums))
+        if i ==0:
+            print(names_test)
 
         # Calc rates
         true_pos = np.sum((pred==255)*(y_test==255))
@@ -164,8 +138,6 @@ def eval(band_selection):
         print('agree, exp_a, kappa',agree, exp_a, kappa)
         print('pfa, pmd, pcc', pfa, pmd, pcc)
         print('prec, rec, f1, iou, tp, fp, tn, fn',precision, recall, f1, iou, true_pos, false_pos, true_neg, false_neg)
-
-        i+=1
 
 
 if __name__=='__main__':
