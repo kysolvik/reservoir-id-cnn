@@ -55,7 +55,6 @@ from keras import backend as K
 K.set_session(sess)
 
 BACKBONE = 'resnet34'
-# loss = DiceLoss(class_weights=np.array([1,2]))
 loss = DiceLoss(class_weights=np.array([1,1]))
 preprocess_input = get_preprocessing(BACKBONE)
 
@@ -140,8 +139,6 @@ def preprocess(imgs, masks, band_selection, mask_crop=0):
     # Select target bands
     imgs = imgs[:, :, :, band_selection]
 
-#     imgs = resize_imgs(imgs, num_bands)
-#     masks = resize_imgs(masks, 1)
     masks = np.expand_dims(masks, 3)
 
     imgs = imgs.astype('float32')
@@ -178,8 +175,8 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 #     imgs_train -= mean
 #     imgs_train /= std
 #     print(imgs_train[...,0].mean())
-    mean = np.mean(imgs_train, axis=(0,1,2))  # mean for data centering
-    std = np.std(imgs_train, axis=(0,1,2))  # std for data normalization
+    mean = np.mean(imgs_train, axis=(0,1,2)), dtype='float64')  # mean for data centering
+    std = np.std(imgs_train, axis=(0,1,2)), dtype='float64')  # std for data normalization
     np.save('mean_std.npy', np.vstack((mean, std)))
     imgs_train -= mean
     imgs_train /= std
