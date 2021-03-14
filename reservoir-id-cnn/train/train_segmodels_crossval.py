@@ -163,8 +163,7 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
         # Test set contains no augmented OR FP
         test = train_test_splits[i][1]
         val = train_test_splits[i-1][1]
-        train = np.delete(train, np.vstack([val,test]),axis=0)
-        train = train_test_splits[i][0]
+        train = np.delete(np.arange(imgs_train.shape[0]), np.hstack([val,test]),axis=0)
         train_fp = fp_train_test_splits[i][0]
         val_fp = fp_train_test_splits[i][1]
         print(train.shape, val.shape, test.shape)
@@ -219,10 +218,11 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 
         num_bands = len(band_selection)
 
-        base_model = Unet(backbone_name=BACKBONE, encoder_weights=None, input_shape=(None, None, num_bands))
+        base_model = Unet(backbone_name=BACKBONE, encoder_weights=None,
+                          input_shape=(None, None, num_bands))
         output = Cropping2D(cropping=(CROP_SIZE, CROP_SIZE))(base_model.layers[-1].output)
         model = Model(base_model.inputs, output, name=base_model.name)
-        optimizer = Adam(lr=learn_rate, decay=2E-3)
+        optimizer = Adam(lr=learn_rate, decay=1E-3)
         model.compile(optimizer, loss=loss, metrics=[iou_score, f1_score, precision, recall])
 
         model_checkpoint = ModelCheckpoint('weights_{}.h5'.format(i),
@@ -257,5 +257,5 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
 
 
 if __name__=='__main__':
-    train(2.5E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
+    train(2E-4, lf.dice_coef_loss, [0, 1, 2, 3, 4, 5, 12, 13, 14, 15],
           val=VAL, epochs=100)
