@@ -198,18 +198,35 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
         mean = np.mean(x_train, axis=(0,1,2), dtype='float64')  # mean for data centering
         std = np.std(x_train, axis=(0,1,2),dtype='float64')  # std for data normalization
         print(mean, std)
+        print('Img mean before:')
+        print(np.mean(x_train, axis=(0,1,2)))
+        print(np.max(x_train, axis=(0,1,2)))
+        print(np.min(x_train, axis=(0,1,2)))
+
         np.save('mean_std_{}.npy'.format(i), np.vstack((mean, std)))
         x_train -= mean
         x_train /= std
         print(x_train[...,0].mean())
+        print('Img mean after:')
+        print(np.mean(x_train, axis=(0,1,2)))
+        print(np.max(x_train, axis=(0,1,2)))
+        print(np.min(x_train, axis=(0,1,2)))
 
         # Preprocess, scale val and test
         x_val -= mean
         x_val /= std
         x_val = preprocess_input(x_val)
+        print('val mean after:')
+        print(np.mean(x_val, axis=(0,1,2)))
+        print(np.max(x_val, axis=(0,1,2)))
+        print(np.min(x_val, axis=(0,1,2)))
         x_test -= mean
         x_test /= std
         x_test = preprocess_input(x_test)
+        print('test mean after:')
+        print(np.mean(x_test, axis=(0,1,2)))
+        print(np.max(x_test, axis=(0,1,2)))
+        print(np.min(x_test, axis=(0,1,2)))
 
         # Check on shapes (again)
         print(x_train.shape, y_train.shape)
