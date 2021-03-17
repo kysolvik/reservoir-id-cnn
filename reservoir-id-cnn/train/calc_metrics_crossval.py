@@ -21,7 +21,7 @@ import pandas as pd
 
 model_structure = './unet_segmodels_10band.txt'
 
-seed_value= 587
+seed_value=587
 
 # Set batch szie
 BATCH_SIZE=8
@@ -102,17 +102,8 @@ def eval(band_selection):
         pred[pred<0.5] = 0
         y_test[y_test>0.5] = 255
         y_test[y_test<0.5] = 0
-        print(np.unique(y_test))
-        print(np.unique(pred))
         pred_sums = np.sum(pred==255, axis=(1,2,3))
         mask_sums = np.sum(y_test==255, axis=(1,2,3))
-        print(np.sum(mask_sums>2000))
-        print(names_test.iloc[mask_sums>2000])
-#         pred = pred[mask_sums<2000]
-#         y_test = y_test[mask_sums<2000]
-        print(np.mean(mask_sums))
-        if i ==0:
-            print(names_test)
 
         # Calc rates
         true_pos = np.sum((pred==255)*(y_test==255))
