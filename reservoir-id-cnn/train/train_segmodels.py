@@ -169,14 +169,8 @@ def train(learn_rate, loss_func, band_selection, val, epochs=200):
                                              band_selection, mask_crop=0)
 
     # Scale imgs based on train mean and std
-#     mean = np.mean(imgs_train, axis=(0,1,2), dtype='float64', keepdims=True)
-#     std = np.std(imgs_train, axis=(0,1,2), dtype='float64', keepdims=True)
-#     np.save('mean_std.npy', np.vstack((mean, std)))
-#     imgs_train -= mean
-#     imgs_train /= std
-#     print(imgs_train[...,0].mean())
-    mean = np.mean(imgs_train, axis=(0,1,2)), dtype='float64')  # mean for data centering
-    std = np.std(imgs_train, axis=(0,1,2)), dtype='float64')  # std for data normalization
+    mean = np.mean(imgs_train, axis=(0,1,2), dtype='float64')  # mean for data centering
+    std = np.std(imgs_train, axis=(0,1,2), dtype='float64')  # std for data normalization
     np.save('mean_std.npy', np.vstack((mean, std)))
     imgs_train -= mean
     imgs_train /= std
